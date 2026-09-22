@@ -46,7 +46,7 @@ def evaluate(df):
 if __name__ == "__main__":
     df = pd.read_csv("../data/simulated_cycle_top_load.csv")
     thresholds = calibrate_thresholds(df)
-    classified = classify_stream(df, thresholds)
+    classified = classify_stream(df, thresholds, debounce_n=20)
     acc, scored = evaluate(classified)
     print(f"Rule-based classification accuracy: {acc*100:.2f}%")
     scored.to_csv("../data/classified_top_load.csv", index=False)
