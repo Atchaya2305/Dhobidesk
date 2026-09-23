@@ -1,11 +1,19 @@
 require('dotenv').config();
 const mqtt = require('mqtt');
 const admin = require('firebase-admin');
+const express = require('express');
+const cors = require('cors');
 const serviceAccount = require('./serviceAccountKey.json');
 
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 
+const DAILY_BOOKING_CAP = 2;
+const GRACE_PERIOD_MINUTES = 15;
+
+// ---------------------------------------------------------------------
+// PART A — MQTT listener: sensor data -> Firestore (same as Step 2.2)
+// ---------------------------------------------------------------------
 const client = mqtt.connect(process.env.HIVEMQ_URL, {
   username: process.env.HIVEMQ_USERNAME,
   password: process.env.HIVEMQ_PASSWORD,
@@ -24,24 +32,30 @@ client.on('message', async (topic, message) => {
   try {
     const payload = JSON.parse(message.toString());
     const { machine_id, state, timestamp } = payload;
+    if (!machine_id || !state) return console.warn('Invalid message, skipping:', payload);
 
-    if (!machine_id || !state) {
-      console.warn('Invalid message, skipping:', payload);
-      return;
-    }
+    const machineRef = db.collection('machines').doc(machine_id);
+    const beforeSnap = await machineRef.get();
+    const beforeStatus = beforeSnap.exists ? beforeSnap.data().status : null;
 
-    await db.collection('machines').doc(machine_id).set({
+    await machineRef.set({
       status: state,
       lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
       lastEventTimestamp: timestamp,
     }, { merge: true });
 
     console.log(`Firestore updated: ${machine_id} -> ${state}`);
+
+    // Replaces Cloud Function "onMachineDone"
+    if (beforeStatus !== 'done' && state === 'done') {
+      await handleMachineDone(machine_id);
+    }
   } catch (err) {
     console.error('Error processing message:', err);
   }
 });
 
+// Stale-data safeguard (unchanged from Step 2.2)
 const STALE_THRESHOLD_MS = 90 * 1000;
 setInterval(async () => {
   const snapshot = await db.collection('machines').get();
@@ -55,3 +69,118 @@ setInterval(async () => {
     }
   });
 }, 30 * 1000);
+
+// ---------------------------------------------------------------------
+// PART B — Booking/notification logic (replaces Cloud Functions)
+// ---------------------------------------------------------------------
+async function handleMachineDone(machineId) {
+  const activeBooking = await db.collection('bookings')
+    .where('machineId', '==', machineId)
+    .where('status', '==', 'active')
+    .limit(1)
+    .get();
+
+  if (!activeBooking.empty) {
+    const bookingDoc = activeBooking.docs[0];
+    await sendPushNotification(bookingDoc.data().userId, 'Your laundry is done!', 'Please collect it soon.');
+    await bookingDoc.ref.update({
+      status: 'completed',
+      notifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    console.log(`Notified user ${bookingDoc.data().userId}, booking marked completed`);
+    await promoteNextInQueue(machineId);
+  }
+}
+
+async function promoteNextInQueue(machineId) {
+  const nextInQueue = await db.collection('bookings')
+    .where('machineId', '==', machineId)
+    .where('status', '==', 'queued')
+    .orderBy('queuePosition')
+    .limit(1)
+    .get();
+
+  if (!nextInQueue.empty) {
+    const nextDoc = nextInQueue.docs[0];
+    await nextDoc.ref.update({ status: 'active' });
+    await sendPushNotification(nextDoc.data().userId, 'Machine is free', 'It is now your turn — machine is available.');
+    console.log(`Promoted next user ${nextDoc.data().userId} to active`);
+  }
+}
+
+// Grace-period checker — runs every 5 minutes (replaces scheduled Cloud Function)
+setInterval(async () => {
+  const cutoff = Date.now() - GRACE_PERIOD_MINUTES * 60 * 1000;
+  const completedBookings = await db.collection('bookings').where('status', '==', 'completed').get();
+
+  for (const doc of completedBookings.docs) {
+    const data = doc.data();
+    const notifiedAt = data.notifiedAt?.toMillis?.() || 0;
+    if (notifiedAt < cutoff && !data.reminderSent) {
+      await sendPushNotification(data.userId, 'Reminder', 'Your laundry is still in the machine — others are waiting.');
+      await doc.ref.update({ reminderSent: true });
+      console.log(`Sent grace-period reminder to ${data.userId}`);
+    }
+  }
+}, 5 * 60 * 1000);
+
+async function sendPushNotification(userId, title, body) {
+  const userSnap = await db.collection('users').doc(userId).get();
+  const fcmToken = userSnap.data()?.fcmToken;
+  if (!fcmToken) return console.warn(`No FCM token for user ${userId}`);
+
+  await admin.messaging().send({ token: fcmToken, notification: { title, body } });
+}
+
+// ---------------------------------------------------------------------
+// PART C — Local HTTP API for the web app to create bookings
+// ---------------------------------------------------------------------
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+app.post('/createBooking', async (req, res) => {
+  try {
+    const { machineId, userId } = req.body;
+    if (!machineId || !userId) return res.status(400).json({ error: 'machineId and userId required' });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const userRef = db.collection('users').doc(userId);
+    const userSnap = await userRef.get();
+    const userData = userSnap.data() || {};
+    const bookingCountToday = userData.lastBookingDate === today ? (userData.dailyBookingCount || 0) : 0;
+
+    if (bookingCountToday >= DAILY_BOOKING_CAP) {
+      return res.status(429).json({ error: 'Daily booking cap reached' });
+    }
+
+    const machineSnap = await db.collection('machines').doc(machineId).get();
+    const machineStatus = machineSnap.data()?.status;
+    const isFree = machineStatus === 'idle' || machineStatus === 'done';
+
+    const existingQueue = await db.collection('bookings')
+      .where('machineId', '==', machineId)
+      .where('status', 'in', ['queued', 'active'])
+      .get();
+
+    const booking = {
+      machineId,
+      userId,
+      status: isFree && existingQueue.empty ? 'active' : 'queued',
+      queuePosition: existingQueue.size,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      notifiedAt: null,
+    };
+
+    const ref = await db.collection('bookings').add(booking);
+    await userRef.set({ dailyBookingCount: bookingCountToday + 1, lastBookingDate: today }, { merge: true });
+
+    res.json({ bookingId: ref.id, status: booking.status });
+  } catch (err) {
+    console.error('createBooking error:', err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+const PORT = 3001;
+app.listen(PORT, () => console.log(`Local booking API listening on http://localhost:${PORT}`));
