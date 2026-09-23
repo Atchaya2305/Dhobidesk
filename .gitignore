@@ -62,9 +62,22 @@ node_modules/
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variables file
+# Environment and secrets
 .env
+.env.*
+!.env.example
+serviceAccountKey.json
+last_known_state.json
+
+# Python
+__pycache__/
+*.pyc
+
+# Build outputs
+dist/
+dist-ssr/
 
 # dataconnect generated files
 .dataconnect
 node_modules
+

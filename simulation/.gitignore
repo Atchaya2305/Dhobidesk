@@ -1,1 +1,7 @@
-venv
+venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+last_known_state.json

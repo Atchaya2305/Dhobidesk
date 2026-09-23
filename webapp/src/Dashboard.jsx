@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { db } from './firebase';
-import { collection, onSnapshot, query, where, orderBy, doc, updateDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, orderBy, doc, setDoc } from 'firebase/firestore';
 import { getMessaging, getToken } from 'firebase/messaging';
 
 const statusColors = {
@@ -39,10 +39,15 @@ function Dashboard({ user }) {
   const bookMachine = async (machineId) => {
     setBookingMsg('Booking...');
     try {
-      const res = await fetch('http://localhost:3001/createBooking', {
+      const idToken = await user.getIdToken();
+      const bridgeUrl = import.meta.env.VITE_BRIDGE_URL || 'http://localhost:3001';
+      const res = await fetch(`${bridgeUrl}/createBooking`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ machineId, userId: user.uid }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ machineId }),
       });
       const data = await res.json();
       setBookingMsg(res.ok
@@ -65,7 +70,7 @@ function Dashboard({ user }) {
       // full FCM token wiring can be added once you generate a VAPID key in
       // Firebase Console > Project Settings > Cloud Messaging.
       setNotifStatus('granted');
-      await updateDoc(doc(db, 'users', user.uid), { notificationsEnabled: true });
+      await setDoc(doc(db, 'users', user.uid), { notificationsEnabled: true }, { merge: true });
     } catch (err) {
       console.error(err);
       setNotifStatus('error');

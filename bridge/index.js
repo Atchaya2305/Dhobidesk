@@ -1,11 +1,35 @@
-require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 const mqtt = require('mqtt');
 const admin = require('firebase-admin');
 const express = require('express');
 const cors = require('cors');
-const serviceAccount = require('./serviceAccountKey.json');
+const rateLimit = require('express-rate-limit');
 
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+let credential;
+if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+  try {
+    const serviceAccountJson = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+    credential = admin.credential.cert(serviceAccountJson);
+  } catch (err) {
+    console.error('Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY JSON string:', err);
+    throw err;
+  }
+} else {
+  const keyPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
+    ? path.resolve(process.env.FIREBASE_SERVICE_ACCOUNT_PATH)
+    : path.resolve(__dirname, 'serviceAccountKey.json');
+
+  if (fs.existsSync(keyPath)) {
+    credential = admin.credential.cert(require(keyPath));
+  } else {
+    console.warn(`Service account file not found at ${keyPath}, attempting applicationDefault credentials...`);
+    credential = admin.credential.applicationDefault();
+  }
+}
+
+admin.initializeApp({ credential });
 const db = admin.firestore();
 
 const DAILY_BOOKING_CAP = 2;
@@ -84,10 +108,10 @@ async function handleMachineDone(machineId) {
     const bookingDoc = activeBooking.docs[0];
     await sendPushNotification(bookingDoc.data().userId, 'Your laundry is done!', 'Please collect it soon.');
     await bookingDoc.ref.update({
-      status: 'completed',
+      status: 'done',
       notifiedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-    console.log(`Notified user ${bookingDoc.data().userId}, booking marked completed`);
+    console.log(`Notified user ${bookingDoc.data().userId}, booking marked done`);
     await promoteNextInQueue(machineId);
   }
 }
@@ -111,9 +135,9 @@ async function promoteNextInQueue(machineId) {
 // Grace-period checker — runs every 5 minutes (replaces scheduled Cloud Function)
 setInterval(async () => {
   const cutoff = Date.now() - GRACE_PERIOD_MINUTES * 60 * 1000;
-  const completedBookings = await db.collection('bookings').where('status', '==', 'completed').get();
+  const doneBookings = await db.collection('bookings').where('status', '==', 'done').get();
 
-  for (const doc of completedBookings.docs) {
+  for (const doc of doneBookings.docs) {
     const data = doc.data();
     const notifiedAt = data.notifiedAt?.toMillis?.() || 0;
     if (notifiedAt < cutoff && !data.reminderSent) {
@@ -136,13 +160,56 @@ async function sendPushNotification(userId, title, body) {
 // PART C — Local HTTP API for the web app to create bookings
 // ---------------------------------------------------------------------
 const app = express();
-app.use(cors());
+
+const corsOriginEnv = process.env.CORS_ORIGIN || 'http://localhost:5173';
+const allowedOrigins = corsOriginEnv.includes(',')
+  ? corsOriginEnv.split(',').map((o) => o.trim())
+  : corsOriginEnv;
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true,
+}));
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+});
+app.use(limiter);
+
 app.use(express.json());
 
-app.post('/createBooking', async (req, res) => {
+// GET /health
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Authentication middleware verifying Firebase ID token
+async function authenticateUser(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized: Missing or invalid Authorization header' });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1].trim();
   try {
-    const { machineId, userId } = req.body;
-    if (!machineId || !userId) return res.status(400).json({ error: 'machineId and userId required' });
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    req.user = decodedToken;
+    next();
+  } catch (err) {
+    console.error('Token verification failed:', err.message);
+    return res.status(401).json({ error: 'Unauthorized: Invalid or expired token' });
+  }
+}
+
+app.post('/createBooking', authenticateUser, async (req, res) => {
+  try {
+    const { machineId } = req.body;
+    const userId = req.user.uid;
+    if (!machineId) return res.status(400).json({ error: 'machineId required' });
 
     const today = new Date().toISOString().slice(0, 10);
     const userRef = db.collection('users').doc(userId);
@@ -182,5 +249,5 @@ app.post('/createBooking', async (req, res) => {
   }
 });
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Local booking API listening on http://localhost:${PORT}`));
