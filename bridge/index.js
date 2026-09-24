@@ -119,26 +119,42 @@ setInterval(async () => {
 // ---------------------------------------------------------------------
 async function handleMachineOffline(machineId) {
   try {
-    const activeBooking = await db.collection('bookings')
+    const activeBookingSnap = await db.collection('bookings')
       .where('machineId', '==', machineId)
       .where('status', '==', 'active')
       .limit(1)
       .get();
 
-    if (!activeBooking.empty) {
-      const bookingDoc = activeBooking.docs[0];
+    if (!activeBookingSnap.empty) {
+      const bookingDoc = activeBookingSnap.docs[0];
       const bookingData = bookingDoc.data();
       if (!bookingData.machineOffline) {
-        await bookingDoc.ref.update({
+        const nowMs = Date.now();
+        const currentExpectedEndAt = bookingData.expectedEndAt;
+        const currentEndMs = currentExpectedEndAt?.toMillis
+          ? currentExpectedEndAt.toMillis()
+          : (currentExpectedEndAt?.seconds ? currentExpectedEndAt.seconds * 1000 : nowMs + 30 * 60 * 1000);
+        const remainingMs = Math.max(0, currentEndMs - nowMs);
+
+        const updateData = {
           machineOffline: true,
-          offlineSince: admin.firestore.FieldValue.serverTimestamp(),
-        });
+          offlineSince: admin.firestore.Timestamp.fromMillis(nowMs),
+          shifted: true,
+          remainingMsAtPause: remainingMs,
+        };
+
+        if (!bookingData.originalEndAt && currentExpectedEndAt) {
+          updateData.originalEndAt = currentExpectedEndAt;
+        }
+
+        await bookingDoc.ref.update(updateData);
+
         await sendPushNotification(
           bookingData.userId,
-          'Machine Offline',
-          `Machine ${machineId} is currently offline. Your laundry cycle is paused.`
+          'Power Cut Alert',
+          `Power lost on machine ${machineId}. Your cycle is paused and completion time will shift.`
         );
-        console.log(`Machine ${machineId} offline: active booking ${bookingDoc.id} flagged and user ${bookingData.userId} notified`);
+        console.log(`Power cut on ${machineId}: active booking ${bookingDoc.id} marked shifted:true, paused with ${Math.round(remainingMs / 1000)}s remaining`);
       }
     }
   } catch (err) {
@@ -148,26 +164,58 @@ async function handleMachineOffline(machineId) {
 
 async function handleMachineOnline(machineId) {
   try {
-    const activeBooking = await db.collection('bookings')
+    const machineSnap = await db.collection('machines').doc(machineId).get();
+    const cycleDurationMinutes = (machineSnap.exists && machineSnap.data().cycleDurationMinutes) || 30;
+
+    const activeBookingSnap = await db.collection('bookings')
       .where('machineId', '==', machineId)
       .where('status', '==', 'active')
       .limit(1)
       .get();
 
-    if (!activeBooking.empty) {
-      const bookingDoc = activeBooking.docs[0];
+    if (!activeBookingSnap.empty) {
+      const bookingDoc = activeBookingSnap.docs[0];
       const bookingData = bookingDoc.data();
       if (bookingData.machineOffline) {
+        const nowMs = Date.now();
+        const remainingMs = typeof bookingData.remainingMsAtPause === 'number'
+          ? bookingData.remainingMsAtPause
+          : cycleDurationMinutes * 60 * 1000;
+
+        const newExpectedEndAt = admin.firestore.Timestamp.fromMillis(nowMs + remainingMs);
+
         await bookingDoc.ref.update({
           machineOffline: false,
-          resumedAt: admin.firestore.FieldValue.serverTimestamp(),
+          resumedAt: admin.firestore.Timestamp.fromMillis(nowMs),
+          expectedEndAt: newExpectedEndAt,
         });
+
+        const newTimeStr = new Date(newExpectedEndAt.toMillis()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         await sendPushNotification(
           bookingData.userId,
-          'Machine Online',
-          `Machine ${machineId} is back online. Your laundry cycle has resumed.`
+          'Power Restored',
+          `Power returned to machine ${machineId}. Your cycle has resumed. New finish time: ${newTimeStr}.`
         );
-        console.log(`Machine ${machineId} online: active booking ${bookingDoc.id} unflagged and user ${bookingData.userId} notified`);
+        console.log(`Power restored on ${machineId}: active booking ${bookingDoc.id} resumed, new expectedEndAt: ${new Date(newExpectedEndAt.toMillis()).toISOString()}`);
+
+        // Recompute estimatedStartAt for all queued bookings on this machine
+        const queuedSnap = await db.collection('bookings')
+          .where('machineId', '==', machineId)
+          .where('status', '==', 'queued')
+          .orderBy('queuePosition')
+          .get();
+
+        if (!queuedSnap.empty) {
+          const batch = db.batch();
+          queuedSnap.docs.forEach((doc, idx) => {
+            const estStartMs = newExpectedEndAt.toMillis() + idx * cycleDurationMinutes * 60 * 1000;
+            batch.update(doc.ref, {
+              estimatedStartAt: admin.firestore.Timestamp.fromMillis(estStartMs),
+            });
+          });
+          await batch.commit();
+          console.log(`Recomputed estimatedStartAt for ${queuedSnap.size} queued bookings on machine ${machineId}`);
+        }
       }
     }
   } catch (err) {
@@ -195,6 +243,9 @@ async function handleMachineDone(machineId) {
 }
 
 async function promoteNextInQueue(machineId) {
+  const machineSnap = await db.collection('machines').doc(machineId).get();
+  const cycleDurationMinutes = (machineSnap.exists && machineSnap.data().cycleDurationMinutes) || 30;
+
   const queuedSnap = await db.collection('bookings')
     .where('machineId', '==', machineId)
     .where('status', '==', 'queued')
@@ -203,19 +254,32 @@ async function promoteNextInQueue(machineId) {
 
   if (!queuedSnap.empty) {
     const [nextDoc, ...remainingDocs] = queuedSnap.docs;
+    const nowMs = Date.now();
+    const startedAt = admin.firestore.Timestamp.fromMillis(nowMs);
+    const expectedEndAt = admin.firestore.Timestamp.fromMillis(nowMs + cycleDurationMinutes * 60 * 1000);
+
     await nextDoc.ref.update({
       status: 'active',
       queuePosition: 0,
       promotedAt: admin.firestore.FieldValue.serverTimestamp(),
+      startedAt,
+      expectedEndAt,
+      estimatedStartAt: null,
+      machineOffline: false,
     });
     await sendPushNotification(nextDoc.data().userId, 'Machine is free', 'It is now your turn — machine is available.');
     console.log(`Promoted user ${nextDoc.data().userId} to active on machine ${machineId}`);
 
-    // Re-number remaining queued bookings starting from 1
+    // Re-number remaining queued bookings starting from 1 and update estimatedStartAt
     if (remainingDocs.length > 0) {
       const batch = db.batch();
       remainingDocs.forEach((doc, idx) => {
-        batch.update(doc.ref, { queuePosition: idx + 1 });
+        const newPos = idx + 1;
+        const estStartMs = expectedEndAt.toMillis() + idx * cycleDurationMinutes * 60 * 1000;
+        batch.update(doc.ref, {
+          queuePosition: newPos,
+          estimatedStartAt: admin.firestore.Timestamp.fromMillis(estStartMs),
+        });
       });
       await batch.commit();
     }
@@ -340,7 +404,9 @@ app.post('/createBooking', authenticateUser, async (req, res) => {
 
       // 2. Machine check
       const machineSnap = await transaction.get(machineRef);
-      const machineStatus = machineSnap.exists ? machineSnap.data().status : 'offline';
+      const machineData = machineSnap.exists ? machineSnap.data() : {};
+      const machineStatus = machineData.status || 'offline';
+      const cycleDurationMinutes = machineData.cycleDurationMinutes || 30;
       const isFree = machineStatus === 'idle' || machineStatus === 'done';
 
       // 3. Queue check
@@ -349,19 +415,38 @@ app.post('/createBooking', authenticateUser, async (req, res) => {
         .where('status', 'in', ['queued', 'active']);
       const existingQueueSnap = await transaction.get(existingQueueQuery);
 
-      const hasActive = existingQueueSnap.docs.some((d) => d.data().status === 'active');
+      const activeDoc = existingQueueSnap.docs.find((d) => d.data().status === 'active');
+      const hasActive = !!activeDoc;
       const queuedDocs = existingQueueSnap.docs.filter((d) => d.data().status === 'queued');
 
       let status;
       let queuePosition;
+      let startedAt = null;
+      let expectedEndAt = null;
+      let estimatedStartAt = null;
+
+      const nowMs = Date.now();
 
       if (isFree && !hasActive && queuedDocs.length === 0) {
         status = 'active';
         queuePosition = 0;
+        startedAt = admin.firestore.Timestamp.fromMillis(nowMs);
+        expectedEndAt = admin.firestore.Timestamp.fromMillis(nowMs + cycleDurationMinutes * 60 * 1000);
       } else {
         status = 'queued';
         const maxPos = queuedDocs.reduce((max, d) => Math.max(max, d.data().queuePosition || 0), 0);
         queuePosition = maxPos + 1;
+
+        let baseEndMs = nowMs;
+        if (activeDoc && activeDoc.data().expectedEndAt) {
+          const endTs = activeDoc.data().expectedEndAt;
+          baseEndMs = endTs.toMillis ? endTs.toMillis() : (endTs.seconds ? endTs.seconds * 1000 : nowMs);
+        } else {
+          baseEndMs = nowMs + cycleDurationMinutes * 60 * 1000;
+        }
+
+        const estStartMs = baseEndMs + (queuePosition - 1) * cycleDurationMinutes * 60 * 1000;
+        estimatedStartAt = admin.firestore.Timestamp.fromMillis(estStartMs);
       }
 
       const newBookingRef = db.collection('bookings').doc();
@@ -372,6 +457,9 @@ app.post('/createBooking', authenticateUser, async (req, res) => {
         queuePosition,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         notifiedAt: null,
+        startedAt,
+        expectedEndAt,
+        estimatedStartAt,
       };
 
       transaction.set(newBookingRef, booking);
@@ -380,7 +468,7 @@ app.post('/createBooking', authenticateUser, async (req, res) => {
         lastBookingDate: today,
       }, { merge: true });
 
-      return { bookingId: newBookingRef.id, status, queuePosition };
+      return { bookingId: newBookingRef.id, status, queuePosition, startedAt, expectedEndAt, estimatedStartAt };
     });
 
     res.json(result);
@@ -428,6 +516,9 @@ app.post('/cancelBooking', authenticateUser, async (req, res) => {
       targetMachineId = booking.machineId;
       const wasActive = booking.status === 'active';
 
+      const targetMachineSnap = await transaction.get(db.collection('machines').doc(targetMachineId));
+      const cycleDurationMinutes = (targetMachineSnap.exists && targetMachineSnap.data().cycleDurationMinutes) || 30;
+
       transaction.update(bookingRef, {
         status: 'cancelled',
         cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -445,19 +536,46 @@ app.post('/cancelBooking', authenticateUser, async (req, res) => {
         if (remainingQueued.length > 0) {
           const nextDoc = remainingQueued[0];
           promotedUserId = nextDoc.data().userId;
+          const nowMs = Date.now();
+          const startedAt = admin.firestore.Timestamp.fromMillis(nowMs);
+          const expectedEndAt = admin.firestore.Timestamp.fromMillis(nowMs + cycleDurationMinutes * 60 * 1000);
+
           transaction.update(nextDoc.ref, {
             status: 'active',
             queuePosition: 0,
             promotedAt: admin.firestore.FieldValue.serverTimestamp(),
+            startedAt,
+            expectedEndAt,
+            estimatedStartAt: null,
+            machineOffline: false,
           });
 
           for (let i = 1; i < remainingQueued.length; i++) {
-            transaction.update(remainingQueued[i].ref, { queuePosition: i });
+            const newPos = i;
+            const estStartMs = expectedEndAt.toMillis() + (i - 1) * cycleDurationMinutes * 60 * 1000;
+            transaction.update(remainingQueued[i].ref, {
+              queuePosition: newPos,
+              estimatedStartAt: admin.firestore.Timestamp.fromMillis(estStartMs),
+            });
           }
         }
       } else {
+        let baseEndMs = Date.now() + cycleDurationMinutes * 60 * 1000;
+        const activeSnap = await transaction.get(
+          db.collection('bookings').where('machineId', '==', targetMachineId).where('status', '==', 'active').limit(1)
+        );
+        if (!activeSnap.empty && activeSnap.docs[0].data().expectedEndAt) {
+          const ts = activeSnap.docs[0].data().expectedEndAt;
+          baseEndMs = ts.toMillis ? ts.toMillis() : (ts.seconds ? ts.seconds * 1000 : baseEndMs);
+        }
+
         for (let i = 0; i < remainingQueued.length; i++) {
-          transaction.update(remainingQueued[i].ref, { queuePosition: i + 1 });
+          const newPos = i + 1;
+          const estStartMs = baseEndMs + i * cycleDurationMinutes * 60 * 1000;
+          transaction.update(remainingQueued[i].ref, {
+            queuePosition: newPos,
+            estimatedStartAt: admin.firestore.Timestamp.fromMillis(estStartMs),
+          });
         }
       }
     });
