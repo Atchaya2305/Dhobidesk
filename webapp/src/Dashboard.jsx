@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { db } from './firebase';
+import { db, getFirebaseMessaging } from './firebase';
 import { collection, onSnapshot, query, where, orderBy, doc, setDoc } from 'firebase/firestore';
-import { getMessaging, getToken } from 'firebase/messaging';
+import { getToken, onMessage } from 'firebase/messaging';
 
 const statusColors = {
   idle: '#4caf50',
@@ -62,12 +62,41 @@ function Dashboard({ user }) {
   const [bookings, setBookings] = useState([]);
   const [bookingMsg, setBookingMsg] = useState('');
   const [notifStatus, setNotifStatus] = useState('unknown');
+  const [toast, setToast] = useState(null);
   const [now, setNow] = useState(Date.now());
 
   // 1-second live ticker for live countdowns
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Foreground push notification listener
+  useEffect(() => {
+    let unsubscribe = null;
+    getFirebaseMessaging().then((msg) => {
+      if (!msg) return;
+      unsubscribe = onMessage(msg, (payload) => {
+        console.log('Foreground push notification received:', payload);
+        const title = payload.notification?.title || 'DhobiDesk Alert';
+        const body = payload.notification?.body || '';
+
+        // If browser permission is granted, also show system notification
+        if (Notification.permission === 'granted') {
+          try {
+            new Notification(title, { body, icon: '/favicon.svg' });
+          } catch (e) {
+            console.log('Notification API fallback:', e);
+          }
+        }
+
+        setToast({ title, body, timestamp: Date.now() });
+      });
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -118,14 +147,45 @@ function Dashboard({ user }) {
         setNotifStatus('denied');
         return;
       }
-      // NOTE: getToken requires a VAPID key + a registered service worker for real push.
-      // For this project stage, we record that permission was granted;
-      // full FCM token wiring can be added once you generate a VAPID key in
-      // Firebase Console > Project Settings > Cloud Messaging.
-      setNotifStatus('granted');
-      await setDoc(doc(db, 'users', user.uid), { notificationsEnabled: true }, { merge: true });
+      setNotifStatus('requesting token...');
+
+      let fcmToken = null;
+      const messagingInstance = await getFirebaseMessaging();
+
+      if (messagingInstance && 'serviceWorker' in navigator) {
+        try {
+          const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+          const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
+
+          if (vapidKey) {
+            fcmToken = await getToken(messagingInstance, {
+              vapidKey,
+              serviceWorkerRegistration: registration,
+            });
+            console.log('FCM Token received:', fcmToken);
+          } else {
+            console.warn('VITE_FIREBASE_VAPID_KEY not set in .env');
+          }
+        } catch (swErr) {
+          console.error('Service worker / getToken error:', swErr);
+        }
+      }
+
+      const updatePayload = { notificationsEnabled: true };
+      if (fcmToken) {
+        updatePayload.fcmToken = fcmToken;
+      }
+
+      await setDoc(doc(db, 'users', user.uid), updatePayload, { merge: true });
+      setNotifStatus(fcmToken ? 'active' : 'granted (need VAPID key)');
+      setToast({
+        title: 'Notifications Activated',
+        body: fcmToken
+          ? 'Push notifications are registered with your device!'
+          : 'Permission granted! Add VITE_FIREBASE_VAPID_KEY in .env to complete web push token registration.',
+      });
     } catch (err) {
-      console.error(err);
+      console.error('Error enabling notifications:', err);
       setNotifStatus('error');
     }
   };
@@ -141,6 +201,39 @@ function Dashboard({ user }) {
       <button onClick={enableNotifications} style={{ marginBottom: 16, padding: 8 }}>
         Enable notifications ({notifStatus})
       </button>
+
+      {toast && (
+        <div style={{
+          background: '#2e7d32',
+          color: '#fff',
+          padding: '12px 18px',
+          borderRadius: 8,
+          marginBottom: 20,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          maxWidth: 600,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+        }}>
+          <div>
+            <strong>{toast.title}</strong>
+            <p style={{ margin: '4px 0 0 0', fontSize: 14 }}>{toast.body}</p>
+          </div>
+          <button
+            onClick={() => setToast(null)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: 18,
+              marginLeft: 16
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {bookingMsg && <p style={{ fontWeight: 'bold' }}>{bookingMsg}</p>}
 
