@@ -155,6 +155,7 @@ async function handleMachineOffline(machineId) {
           `Power lost on machine ${machineId}. Your cycle is paused and completion time will shift.`
         );
         console.log(`Power cut on ${machineId}: active booking ${bookingDoc.id} marked shifted:true, paused with ${Math.round(remainingMs / 1000)}s remaining`);
+        await syncMachineQueue(machineId);
       }
     }
   } catch (err) {
@@ -217,6 +218,7 @@ async function handleMachineOnline(machineId) {
           console.log(`Recomputed estimatedStartAt for ${queuedSnap.size} queued bookings on machine ${machineId}`);
         }
       }
+      await syncMachineQueue(machineId);
     }
   } catch (err) {
     console.error(`Error in handleMachineOnline for ${machineId}:`, err);
@@ -239,6 +241,7 @@ async function handleMachineDone(machineId) {
     });
     console.log(`Notified user ${bookingDoc.data().userId}, booking marked done`);
     await promoteNextInQueue(machineId);
+    await syncMachineQueue(machineId);
   }
 }
 
@@ -283,8 +286,46 @@ async function promoteNextInQueue(machineId) {
       });
       await batch.commit();
     }
+    await syncMachineQueue(machineId);
   }
 }
+
+// Synchronize machine queue length and active cycle timing to machines collection
+async function syncMachineQueue(machineId) {
+  try {
+    const queueSnap = await db.collection('bookings')
+      .where('machineId', '==', machineId)
+      .where('status', 'in', ['queued', 'active'])
+      .get();
+
+    const activeDoc = queueSnap.docs.find((d) => d.data().status === 'active');
+    const queuedDocs = queueSnap.docs.filter((d) => d.data().status === 'queued');
+
+    const updatePayload = {
+      queueLength: queuedDocs.length,
+      hasActiveBooking: !!activeDoc,
+      activeBookingExpectedEndAt: activeDoc ? (activeDoc.data().expectedEndAt || null) : null,
+      activeBookingOffline: activeDoc ? !!activeDoc.data().machineOffline : false,
+    };
+
+    await db.collection('machines').doc(machineId).set(updatePayload, { merge: true });
+    console.log(`Synced machine queue info for ${machineId}: queueLength=${queuedDocs.length}, hasActive=${!!activeDoc}`);
+  } catch (err) {
+    console.error(`Error in syncMachineQueue for ${machineId}:`, err.message);
+  }
+}
+
+async function syncAllMachines() {
+  try {
+    const machinesSnap = await db.collection('machines').get();
+    for (const doc of machinesSnap.docs) {
+      await syncMachineQueue(doc.id);
+    }
+  } catch (err) {
+    console.error('Error in syncAllMachines:', err.message);
+  }
+}
+syncAllMachines();
 
 // Grace-period checker — runs every 5 minutes (replaces scheduled Cloud Function)
 setInterval(async () => {
@@ -471,6 +512,8 @@ app.post('/createBooking', authenticateUser, async (req, res) => {
       return { bookingId: newBookingRef.id, status, queuePosition, startedAt, expectedEndAt, estimatedStartAt };
     });
 
+    await syncMachineQueue(machineId);
+
     res.json(result);
   } catch (err) {
     console.error('createBooking error:', err.message);
@@ -589,6 +632,10 @@ app.post('/cancelBooking', authenticateUser, async (req, res) => {
       console.log(`Promoted user ${promotedUserId} to active on cancellation of active booking on ${targetMachineId}`);
     }
 
+    if (targetMachineId) {
+      await syncMachineQueue(targetMachineId);
+    }
+
     res.json({ success: true, bookingId, status: 'cancelled' });
   } catch (err) {
     console.error('cancelBooking error:', err.message);
@@ -607,6 +654,7 @@ app.post('/markCollected', authenticateUser, async (req, res) => {
     if (!bookingId) return res.status(400).json({ error: 'bookingId required' });
 
     const bookingRef = db.collection('bookings').doc(bookingId);
+    let targetMachineId = null;
 
     await db.runTransaction(async (transaction) => {
       const snap = await transaction.get(bookingRef);
@@ -629,11 +677,17 @@ app.post('/markCollected', authenticateUser, async (req, res) => {
         throw error;
       }
 
+      targetMachineId = booking.machineId;
+
       transaction.update(bookingRef, {
         status: 'collected',
         collectedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     });
+
+    if (targetMachineId) {
+      await syncMachineQueue(targetMachineId);
+    }
 
     res.json({ success: true, bookingId, status: 'collected' });
   } catch (err) {
