@@ -1,655 +1,764 @@
-import { useEffect, useState, useMemo } from 'react';
-import { db, getFirebaseMessaging, auth } from './firebase';
-import { collection, onSnapshot, query, where, orderBy, doc, setDoc } from 'firebase/firestore';
-import { getToken, onMessage } from 'firebase/messaging';
-import './App.css';
+import { useState, useEffect, useMemo } from 'react';
+import Sidebar from './components/Sidebar';
+import Navbar from './components/Navbar';
+import SummaryCards from './components/SummaryCards';
+import MachineCard from './components/MachineCard';
+import BookingModal from './components/BookingModal';
+import BookingsView from './components/BookingsView';
+import FaultsView from './components/FaultsView';
+import NotificationsView from './components/NotificationsView';
+import ProfileView from './components/ProfileView';
+import ApprovalsView from './components/ApprovalsView';
+import AdminModal from './components/AdminModal';
 
-function formatCountdown(booking, now) {
-  if (booking.status !== 'active') return null;
-  if (booking.machineOffline) {
-    return { text: 'PAUSED', isPaused: true, isDone: false };
-  }
-  if (!booking.expectedEndAt) {
-    return { text: 'In progress', isPaused: false, isDone: false };
-  }
-  const endMs = booking.expectedEndAt.toMillis
-    ? booking.expectedEndAt.toMillis()
-    : (booking.expectedEndAt.seconds ? booking.expectedEndAt.seconds * 1000 : 0);
+import { 
+  loadStoredMachines, 
+  saveStoredMachines, 
+  loadStoredBookings, 
+  saveStoredBookings, 
+  loadStoredFaults,
+  saveStoredFaults,
+  loadStoredNotifications, 
+  saveStoredNotifications,
+  INITIAL_MACHINES,
+  INITIAL_BOOKINGS,
+  INITIAL_FAULTS,
+  INITIAL_NOTIFICATIONS
+} from './data/mockData';
 
-  const diffSec = Math.floor((endMs - now) / 1000);
-  if (diffSec <= 0) {
-    return { text: 'Finishing...', isPaused: false, isDone: true };
-  }
-  const m = Math.floor(diffSec / 60);
-  const s = diffSec % 60;
-  return {
-    text: `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`,
-    isPaused: false,
-    isDone: false,
-  };
-}
+import { 
+  Layers, 
+  Filter, 
+  Search, 
+  Sparkles, 
+  PlusCircle, 
+  CalendarClock, 
+  CheckCircle2, 
+  Clock, 
+  AlertCircle,
+  ArrowRight,
+  ShieldAlert,
+  AlertTriangle
+} from 'lucide-react';
 
-function formatSchedule(booking, now) {
-  if (booking.status === 'active') {
-    const cd = formatCountdown(booking, now);
-    return cd ? cd.text : 'Active';
-  }
-  if (booking.status === 'queued') {
-    if (booking.estimatedStartAt) {
-      const startMs = booking.estimatedStartAt.toMillis
-        ? booking.estimatedStartAt.toMillis()
-        : (booking.estimatedStartAt.seconds ? booking.estimatedStartAt.seconds * 1000 : 0);
-      const timeStr = new Date(startMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      return `Est. start: ${timeStr} (Queue #${booking.queuePosition || 1})`;
+export default function Dashboard({ 
+  user, 
+  onLogout, 
+  onUpdateUser,
+  pendingUsers = [],
+  registeredUsers = [],
+  onApproveStudent,
+  onRejectStudent
+}) {
+  const isAdmin = user?.role === 'admin';
+
+  // Navigation State: 'dashboard' | 'machines' | 'faults' | 'bookings' | 'notifications' | 'profile'
+  const [activeSection, setActiveSection] = useState('dashboard');
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+  // Core Data States with localStorage initial loading
+  const [machines, setMachines] = useState(() => loadStoredMachines());
+  const [bookings, setBookings] = useState(() => loadStoredBookings());
+  const [faults, setFaults] = useState(() => loadStoredFaults());
+  const [notifications, setNotifications] = useState(() => loadStoredNotifications());
+
+  // Filter States for Machines Grid
+  const [selectedFloor, setSelectedFloor] = useState('All');
+  const [selectedStatus, setSelectedStatus] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Modals
+  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+  const [selectedMachineForBooking, setSelectedMachineForBooking] = useState(null);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+
+  // Sync to localStorage whenever states change
+  useEffect(() => {
+    saveStoredMachines(machines);
+  }, [machines]);
+
+  useEffect(() => {
+    saveStoredBookings(bookings);
+  }, [bookings]);
+
+  useEffect(() => {
+    saveStoredFaults(faults);
+  }, [faults]);
+
+  useEffect(() => {
+    saveStoredNotifications(notifications);
+  }, [notifications]);
+
+  // Unread notifications & active user bookings counts
+  const unreadCount = useMemo(() => {
+    return notifications.filter((n) => !n.read).length;
+  }, [notifications]);
+
+  const activeBookingsCount = useMemo(() => {
+    if (isAdmin) {
+      return bookings.filter((b) => b.status === 'active' || b.status === 'upcoming').length;
     }
-    return `Queue #${booking.queuePosition || 1}`;
-  }
-  if (booking.status === 'done') return 'Finished — Please collect';
-  if (booking.status === 'collected') return 'Collected';
-  if (booking.status === 'cancelled') return 'Cancelled';
-  return '-';
-}
+    return bookings.filter(
+      (b) => b.userId === user?.uid && (b.status === 'active' || b.status === 'upcoming')
+    ).length;
+  }, [bookings, user?.uid, isAdmin]);
 
-function getMachineWaitInfo(machine, now) {
-  const queueLength = typeof machine.queueLength === 'number' ? machine.queueLength : 0;
-  const cycleMinutes = machine.cycleDurationMinutes || 30;
+  const activeFaultsCount = useMemo(() => {
+    return faults.filter((f) => f.status !== 'resolved').length;
+  }, [faults]);
 
-  if (machine.status === 'offline') {
-    return {
-      type: 'offline',
-      badgeClass: 'wait-offline',
-      text: `Offline (${queueLength} in queue)`,
-      isAvailable: false,
-    };
-  }
+  const pendingApprovalsCount = useMemo(() => {
+    return pendingUsers.filter((u) => u.status === 'pending').length;
+  }, [pendingUsers]);
 
-  // If idle, no active booking flag, and no queue
-  if ((machine.status === 'idle' || machine.status === 'done') && !machine.hasActiveBooking && queueLength === 0) {
-    return {
-      type: 'available',
-      badgeClass: 'wait-available',
-      text: 'Available now',
-      isAvailable: true,
-    };
-  }
-
-  // Calculate remaining time on active cycle
-  let activeRemainingMins = cycleMinutes;
-  if (machine.activeBookingExpectedEndAt) {
-    const endMs = machine.activeBookingExpectedEndAt.toMillis
-      ? machine.activeBookingExpectedEndAt.toMillis()
-      : (machine.activeBookingExpectedEndAt.seconds ? machine.activeBookingExpectedEndAt.seconds * 1000 : 0);
-    const diffMs = Math.max(0, endMs - now);
-    activeRemainingMins = Math.ceil(diffMs / 60000);
-  }
-
-  const totalWaitMins = activeRemainingMins + queueLength * cycleMinutes;
-  const prefix = queueLength > 0 ? `Queue: ${queueLength} • ` : (machine.hasActiveBooking ? 'In cycle • ' : '');
-
-  return {
-    type: 'busy',
-    badgeClass: 'wait-busy',
-    text: `${prefix}~${totalWaitMins}m wait`,
-    isAvailable: false,
-  };
-}
-
-function Dashboard({ user }) {
-  const [machines, setMachines] = useState([]);
-  const [bookings, setBookings] = useState([]);
-  const [notifStatus, setNotifStatus] = useState('unknown');
-  const [toasts, setToasts] = useState([]);
-  const [now, setNow] = useState(Date.now());
-  const [actionLoading, setActionLoading] = useState(null); // { type, id }
-  const [historyFilter, setHistoryFilter] = useState('all'); // 'all' | 'active_queued' | 'past'
-
-  // 1-second live ticker for countdowns and wait time updates
+  // =========================================================
+  // REAL-TIME SIMULATED IOT TELEMETRY TICKER (1-second interval)
+  // =========================================================
   useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
+    const timer = setInterval(() => {
+      setMachines((prevMachines) => {
+        let hasChanges = false;
+        const updated = prevMachines.map((m) => {
+          if (m.status === 'WASHING') {
+            hasChanges = true;
+            const newRem = Math.max(0, (m.remainingSeconds || 1200) - 1);
+            const totalDurationSec = (m.cycleDurationMinutes || 35) * 60;
+            const newProgress = Math.min(99, Math.round(((totalDurationSec - newRem) / totalDurationSec) * 100));
 
-  // Helper to add auto-dismissing toast notifications
-  const addToast = (title, body, type = 'info') => {
-    const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, title, body, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4500);
-  };
+            // Realistic sensor telemetry jitter
+            const rpmJitter = 760 + Math.floor(Math.sin(Date.now() / 1000) * 25);
+            const vibJitter = +(0.18 + Math.random() * 0.06).toFixed(2);
 
-  const removeToast = (id) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
+            // Phase shift: If less than 5 mins (300 sec) left, shift to SPINNING phase
+            if (newRem <= 300 && newRem > 0) {
+              addNotification({
+                title: `${m.name} Phase Shift ⚡`,
+                message: `${m.name} (${m.floor}) has transitioned to the SPINNING phase (high-speed extraction).`,
+                type: 'info',
+                machineId: m.id,
+              });
 
-  // Foreground push notification listener
-  useEffect(() => {
-    let unsubscribe = null;
-    getFirebaseMessaging().then((msg) => {
-      if (!msg) return;
-      unsubscribe = onMessage(msg, (payload) => {
-        console.log('Foreground push notification received:', payload);
-        const title = payload.notification?.title || 'DhobiDesk Alert';
-        const body = payload.notification?.body || '';
+              return {
+                ...m,
+                status: 'SPINNING',
+                remainingSeconds: newRem,
+                progress: newProgress,
+                waterLevel: 15,
+                rpm: 1200,
+                vibration: 0.42,
+              };
+            }
 
-        // If browser permission is granted, also show system notification
-        if (Notification.permission === 'granted') {
-          try {
-            new Notification(title, { body, icon: '/favicon.svg' });
-          } catch (e) {
-            console.log('Notification API fallback:', e);
+            return {
+              ...m,
+              remainingSeconds: newRem,
+              progress: newProgress,
+              rpm: rpmJitter,
+              vibration: vibJitter,
+              waterLevel: m.waterLevel || 72,
+            };
           }
-        }
 
-        addToast(title, body, 'info');
+          if (m.status === 'SPINNING') {
+            hasChanges = true;
+            const newRem = Math.max(0, (m.remainingSeconds || 300) - 1);
+            const totalDurationSec = (m.cycleDurationMinutes || 35) * 60;
+            const newProgress = Math.min(100, Math.round(((totalDurationSec - newRem) / totalDurationSec) * 100));
+
+            // Spin telemetry
+            const rpmJitter = 1200 + Math.floor(Math.sin(Date.now() / 800) * 50);
+            const vibJitter = +(0.38 + Math.random() * 0.08).toFixed(2);
+
+            // Cycle Completed!
+            if (newRem <= 0) {
+              addNotification({
+                title: `Laundry Ready! 🎉 (${m.name})`,
+                message: `${m.name} on ${m.floor} has completed its wash cycle. Please collect clothes within 15 minutes.`,
+                type: 'success',
+                machineId: m.id,
+              });
+
+              // Mark active booking for this machine as completed
+              setBookings((prevBookings) =>
+                prevBookings.map((b) =>
+                  b.machineId === m.id && b.status === 'active'
+                    ? { ...b, status: 'completed', completedAt: 'Just now' }
+                    : b
+                )
+              );
+
+              return {
+                ...m,
+                status: 'COMPLETED',
+                progress: 100,
+                remainingSeconds: 0,
+                waterLevel: 0,
+                rpm: 0,
+                vibration: 0.01,
+              };
+            }
+
+            return {
+              ...m,
+              remainingSeconds: newRem,
+              progress: newProgress,
+              rpm: rpmJitter,
+              vibration: vibJitter,
+              waterLevel: Math.max(0, (m.waterLevel || 15) - 0.05),
+            };
+          }
+
+          return m;
+        });
+
+        return hasChanges ? updated : prevMachines;
       });
-    });
+    }, 1000);
 
-    return () => {
-      if (unsubscribe) unsubscribe();
+    return () => clearInterval(timer);
+  }, []);
+
+  // Helper to add notifications
+  const addNotification = (notif) => {
+    const newNotif = {
+      id: 'notif_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+      title: notif.title,
+      message: notif.message,
+      timestamp: 'Just now',
+      type: notif.type || 'info',
+      read: false,
+      machineId: notif.machineId || null,
     };
-  }, []);
+    setNotifications((prev) => [newNotif, ...prev]);
+  };
 
-  // Real-time listener for machines
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'machines'), (snapshot) => {
-      setMachines(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+  // =========================================================
+  // BOOKING & TOKEN HANDLERS
+  // =========================================================
+  const handleOpenBookingModal = (machine = null) => {
+    setSelectedMachineForBooking(machine);
+    setIsBookingModalOpen(true);
+  };
+
+  const handleConfirmBooking = (newBooking) => {
+    setBookings((prev) => [newBooking, ...prev]);
+
+    // Dispatch booking confirmed notification
+    addNotification({
+      title: 'Slot Reserved Confirmed 🗓️',
+      message: `${newBooking.machineName} (${newBooking.floor}) reserved for ${newBooking.date} at ${newBooking.slotTime}.`,
+      type: 'info',
+      machineId: newBooking.machineId,
     });
-    return () => unsub();
-  }, []);
+  };
 
-  // Real-time listener for current user's bookings
-  useEffect(() => {
-    const q = query(
-      collection(db, 'bookings'),
-      where('userId', '==', user.uid),
-      orderBy('createdAt', 'desc')
+  // CANCELLATION HANDLER: Supports student self-cancellation AND Admin force revocation
+  const handleCancelBooking = (bookingId, reason = 'Cancelled by student') => {
+    const booking = bookings.find((b) => b.id === bookingId);
+    if (!booking) return;
+
+    setBookings((prev) =>
+      prev.map((b) =>
+        b.id === bookingId
+          ? { ...b, status: 'cancelled', cancelReason: reason }
+          : b
+      )
     );
-    const unsub = onSnapshot(q, (snapshot) => {
-      setBookings(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
-    return () => unsub();
-  }, [user.uid]);
 
-  // Request browser FCM notification permissions & register token
-  const enableNotifications = async () => {
-    try {
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        setNotifStatus('denied');
-        addToast('Notifications Denied', 'Permission to display notifications was denied.', 'warning');
-        return;
-      }
-      setNotifStatus('requesting token...');
-
-      let fcmToken = null;
-      const messagingInstance = await getFirebaseMessaging();
-
-      if (messagingInstance && 'serviceWorker' in navigator) {
-        try {
-          const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-          const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
-
-          if (vapidKey) {
-            fcmToken = await getToken(messagingInstance, {
-              vapidKey,
-              serviceWorkerRegistration: registration,
-            });
-            console.log('FCM Token received:', fcmToken);
-          } else {
-            console.warn('VITE_FIREBASE_VAPID_KEY not set in .env');
-          }
-        } catch (swErr) {
-          console.error('Service worker / getToken error:', swErr);
+    // Free the machine if it was in cycle or reserved
+    setMachines((prev) =>
+      prev.map((m) => {
+        if (m.id === booking.machineId && (m.currentUserId === booking.userId || isAdmin)) {
+          return {
+            ...m,
+            status: 'IDLE',
+            progress: 0,
+            remainingSeconds: 0,
+            waterLevel: 0,
+            rpm: 0,
+            vibration: 0.01,
+            currentUserId: null,
+            currentUser: null,
+            currentRoom: null,
+            cycleType: null,
+          };
         }
-      }
+        return m;
+      })
+    );
 
-      const updatePayload = { notificationsEnabled: true };
-      if (fcmToken) {
-        updatePayload.fcmToken = fcmToken;
-      }
+    if (isAdmin) {
+      addNotification({
+        title: `Hostel Token #${booking.tokenNumber || booking.id.toUpperCase()} Revoked ✕`,
+        message: `Reservation for ${booking.userName} (${booking.roomNumber}) on ${booking.machineName} was revoked by Admin. Reason: ${reason}. Slot freed.`,
+        type: 'alert',
+        machineId: booking.machineId,
+      });
+    } else {
+      addNotification({
+        title: 'Booking Cancelled ✕',
+        message: `Your reservation on ${booking.machineName} for ${booking.slotTime} was cancelled and slot released.`,
+        type: 'warning',
+        machineId: booking.machineId,
+      });
+    }
+  };
 
-      await setDoc(doc(db, 'users', user.uid), updatePayload, { merge: true });
-      setNotifStatus(fcmToken ? 'active' : 'granted (need VAPID key)');
-      addToast(
-        'Notifications Activated',
-        fcmToken
-          ? 'Push notifications are registered with your device!'
-          : 'Permission granted! Add VITE_FIREBASE_VAPID_KEY in .env to complete web push token registration.',
-        'success'
+  const handleCollectLaundry = (machine) => {
+    setMachines((prev) =>
+      prev.map((m) => {
+        if (m.id === machine.id) {
+          return {
+            ...m,
+            status: 'IDLE',
+            progress: 0,
+            remainingSeconds: 0,
+            waterLevel: 0,
+            rpm: 0,
+            vibration: 0.01,
+            currentUserId: null,
+            currentUser: null,
+            currentRoom: null,
+            cycleType: null,
+          };
+        }
+        return m;
+      })
+    );
+
+    addNotification({
+      title: 'Laundry Collected ✓',
+      message: `Clean laundry collected from ${machine.name} (${machine.floor}). Machine is now available for other students.`,
+      type: 'success',
+      machineId: machine.id,
+    });
+  };
+
+  // =========================================================
+  // FAULT RESOLUTION & REPAIR HANDLERS
+  // =========================================================
+  const handleResolveFault = (faultId, machineId) => {
+    setFaults((prev) =>
+      prev.map((f) => (f.id === faultId ? { ...f, status: 'resolved' } : f))
+    );
+
+    setMachines((prev) =>
+      prev.map((m) => {
+        if (m.id === machineId) {
+          return {
+            ...m,
+            status: 'IDLE',
+            fault: null,
+            offlineReason: null,
+          };
+        }
+        return m;
+      })
+    );
+
+    addNotification({
+      title: 'Machine Restored to Fleet ✓',
+      message: `Hardware fault was resolved by Facility Maintenance. Machine is back online and available for bookings.`,
+      type: 'success',
+      machineId,
+    });
+  };
+
+  // =========================================================
+  // ADMIN OVERRIDE HANDLERS
+  // =========================================================
+  const handleUpdateMachineStatus = (machineId, newStatus) => {
+    setMachines((prev) =>
+      prev.map((m) => {
+        if (m.id === machineId) {
+          let remSec = 0;
+          let prog = 0;
+          let wLvl = 0;
+          let r = 0;
+          let vib = 0.01;
+
+          if (newStatus === 'WASHING') {
+            remSec = (m.cycleDurationMinutes || 35) * 60;
+            prog = 10;
+            wLvl = 70;
+            r = 750;
+            vib = 0.22;
+          } else if (newStatus === 'SPINNING') {
+            remSec = 300;
+            prog = 80;
+            wLvl = 15;
+            r = 1250;
+            vib = 0.44;
+          } else if (newStatus === 'COMPLETED') {
+            prog = 100;
+          }
+
+          return {
+            ...m,
+            status: newStatus,
+            remainingSeconds: remSec,
+            progress: prog,
+            waterLevel: wLvl,
+            rpm: r,
+            vibration: vib,
+            currentUserId: newStatus === 'IDLE' ? null : m.currentUserId,
+            currentUser: newStatus === 'IDLE' ? null : m.currentUser,
+            currentRoom: newStatus === 'IDLE' ? null : m.currentRoom,
+          };
+        }
+        return m;
+      })
+    );
+
+    addNotification({
+      title: 'Admin Override Applied ⚙️',
+      message: `Machine status manually changed to ${newStatus} by Facility Administration.`,
+      type: 'warning',
+      machineId,
+    });
+  };
+
+  const handleAdminRevokeActiveCycle = (machineId) => {
+    const targetMachine = machines.find((m) => m.id === machineId);
+    if (!targetMachine) return;
+
+    if (window.confirm(`Force stop active laundry cycle on ${targetMachine.name}? This will drain the drum and reset the washer to IDLE.`)) {
+      setMachines((prev) =>
+        prev.map((m) => {
+          if (m.id === machineId) {
+            return {
+              ...m,
+              status: 'IDLE',
+              progress: 0,
+              remainingSeconds: 0,
+              waterLevel: 0,
+              rpm: 0,
+              vibration: 0.01,
+              currentUserId: null,
+              currentUser: null,
+              currentRoom: null,
+              cycleType: null,
+            };
+          }
+          return m;
+        })
       );
-    } catch (err) {
-      console.error('Error enabling notifications:', err);
-      setNotifStatus('error');
-      addToast('Notification Setup Error', 'Could not activate notifications.', 'error');
-    }
-  };
 
-  // POST /createBooking
-  const bookMachine = async (machineId) => {
-    setActionLoading({ type: 'book', id: machineId });
-    try {
-      const idToken = await user.getIdToken();
-      const bridgeUrl = import.meta.env.VITE_BRIDGE_URL || 'http://localhost:3001';
-      const res = await fetch(`${bridgeUrl}/createBooking`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({ machineId }),
+      // Cancel active booking
+      setBookings((prev) =>
+        prev.map((b) =>
+          b.machineId === machineId && b.status === 'active'
+            ? { ...b, status: 'cancelled', cancelReason: 'Revoked by Administration' }
+            : b
+        )
+      );
+
+      addNotification({
+        title: `Active Cycle Cancelled by Admin ⚡ (${targetMachine.name})`,
+        message: `Cycle on ${targetMachine.name} was aborted and slot cleared by Warden.`,
+        type: 'alert',
+        machineId,
       });
-      const data = await res.json();
-      if (res.ok) {
-        addToast(
-          'Booking Confirmed',
-          data.status === 'active'
-            ? `Your wash cycle on ${machineId} has started!`
-            : `Added to queue (#${data.queuePosition}) for ${machineId}.`,
-          'success'
-        );
-      } else {
-        addToast('Booking Failed', data.error || 'Could not complete booking', 'error');
-      }
-    } catch (err) {
-      addToast('Connection Error', 'Could not reach booking server. Is bridge running?', 'error');
-    } finally {
-      setActionLoading(null);
     }
   };
 
-  // POST /cancelBooking
-  const cancelBooking = async (bookingId, machineId) => {
-    if (!window.confirm(`Are you sure you want to cancel your reservation on ${machineId}?`)) {
-      return;
-    }
+  const handleResetAllMachines = () => {
+    setMachines((prev) =>
+      prev.map((m) => ({
+        ...m,
+        status: 'IDLE',
+        progress: 0,
+        remainingSeconds: 0,
+        waterLevel: 0,
+        rpm: 0,
+        vibration: 0.01,
+        currentUserId: null,
+        currentUser: null,
+        currentRoom: null,
+        cycleType: null,
+      }))
+    );
 
-    setActionLoading({ type: 'cancel', id: bookingId });
-    try {
-      const idToken = await user.getIdToken();
-      const bridgeUrl = import.meta.env.VITE_BRIDGE_URL || 'http://localhost:3001';
-      const res = await fetch(`${bridgeUrl}/cancelBooking`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({ bookingId }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        addToast('Reservation Cancelled', `Your reservation on ${machineId} was cancelled.`, 'info');
-      } else {
-        addToast('Cancellation Error', data.error || 'Failed to cancel reservation', 'error');
-      }
-    } catch (err) {
-      addToast('Connection Error', 'Could not reach booking server.', 'error');
-    } finally {
-      setActionLoading(null);
-    }
+    addNotification({
+      title: 'Fleet Reset Executed 🔄',
+      message: 'All 6 washing machines were reset to IDLE by Facility Admin.',
+      type: 'info',
+    });
   };
 
-  // POST /markCollected
-  const markCollected = async (bookingId, machineId) => {
-    setActionLoading({ type: 'collect', id: bookingId });
-    try {
-      const idToken = await user.getIdToken();
-      const bridgeUrl = import.meta.env.VITE_BRIDGE_URL || 'http://localhost:3001';
-      const res = await fetch(`${bridgeUrl}/markCollected`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({ bookingId }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        addToast('Laundry Collected', `Marked as collected from ${machineId}. Thank you!`, 'success');
-      } else {
-        addToast('Error', data.error || 'Failed to mark as collected', 'error');
-      }
-    } catch (err) {
-      addToast('Connection Error', 'Could not reach booking server.', 'error');
-    } finally {
-      setActionLoading(null);
-    }
+  // Notification actions
+  const handleMarkAllRead = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
 
-  // Categorize reservations
-  const activeBooking = useMemo(() => bookings.find((b) => b.status === 'active'), [bookings]);
+  const handleMarkOneRead = (id) => {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+    );
+  };
 
-  // Order queued bookings sequentially (#1, #2, #3, ...)
-  const queuedBookings = useMemo(
-    () =>
-      bookings
-        .filter((b) => b.status === 'queued')
-        .sort((a, b) => (a.queuePosition || 0) - (b.queuePosition || 0)),
-    [bookings]
-  );
+  const handleClearAllNotifs = () => {
+    setNotifications([]);
+  };
 
-  const pickupBookings = useMemo(() => bookings.filter((b) => b.status === 'done'), [bookings]);
-  const historyBookings = useMemo(
-    () => bookings.filter((b) => b.status === 'collected' || b.status === 'cancelled' || b.status === 'done'),
-    [bookings]
-  );
+  // =========================================================
+  // FILTERED MACHINES LIST
+  // =========================================================
+  const filteredMachines = useMemo(() => {
+    return machines.filter((m) => {
+      // Floor filter
+      if (selectedFloor !== 'All' && m.floor !== selectedFloor) return false;
 
-  const displayedBookings = useMemo(() => {
-    if (historyFilter === 'past') {
-      return bookings.filter((b) => b.status === 'collected' || b.status === 'cancelled' || b.status === 'done');
+      // Status filter
+      if (selectedStatus !== 'All' && m.status !== selectedStatus) return false;
+
+      // Search query
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        const matchesName = m.name.toLowerCase().includes(query);
+        const matchesNum = m.machineNumber.includes(query);
+        const matchesFloor = m.floor.toLowerCase().includes(query);
+        const matchesType = m.type.toLowerCase().includes(query);
+        const matchesUser = m.currentUser && m.currentUser.toLowerCase().includes(query);
+        const matchesRoom = m.currentRoom && m.currentRoom.toLowerCase().includes(query);
+        return matchesName || matchesNum || matchesFloor || matchesType || matchesUser || matchesRoom;
+      }
+
+      return true;
+    });
+  }, [machines, selectedFloor, selectedStatus, searchQuery]);
+
+  // Dynamic Section Title
+  const getSectionTitle = () => {
+    switch (activeSection) {
+      case 'machines': return 'Campus Washer Fleet Directory';
+      case 'approvals': return 'Student Registration Approvals & Directory';
+      case 'faults': return 'Machine Faults & Sensor Anomaly Center';
+      case 'bookings': return isAdmin ? 'Hostel Tokens & Reservation Console' : 'My Reserved Laundry Slots';
+      case 'notifications': return 'System Alerts & IoT Notifications';
+      case 'profile': return isAdmin ? 'Hostel Administration Settings' : 'Student Profile & Washing Quota';
+      default: return isAdmin ? 'Hostel Laundry Administration Console' : 'Campus Laundry Operations Hub';
     }
-    if (historyFilter === 'active_queued') {
-      return bookings.filter((b) => b.status === 'active' || b.status === 'queued');
-    }
-    return bookings;
-  }, [bookings, historyFilter]);
-
-  const activeCountdown = activeBooking ? formatCountdown(activeBooking, now) : null;
+  };
 
   return (
-    <div className="dhobidesk-app">
-      {/* Toast Notification Container */}
-      <div className="toast-container">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.type}`}>
-            <div>
-              <div className="toast-title">{t.title}</div>
-              <div className="toast-body">{t.body}</div>
-            </div>
-            <button className="toast-close" onClick={() => removeToast(t.id)}>✕</button>
-          </div>
-        ))}
-      </div>
+    <div className="app-layout">
+      {/* Sidebar Navigation */}
+      <Sidebar
+        activeSection={activeSection}
+        setActiveSection={setActiveSection}
+        unreadCount={unreadCount}
+        activeBookingsCount={activeBookingsCount}
+        activeFaultsCount={activeFaultsCount}
+        pendingApprovalsCount={pendingApprovalsCount}
+        onOpenAdmin={() => setIsAdminModalOpen(true)}
+        isMobileOpen={isMobileOpen}
+        setIsMobileOpen={setIsMobileOpen}
+        user={user}
+        onLogout={onLogout}
+      />
 
-      {/* Header Bar */}
-      <header className="dhobidesk-header">
-        <div className="dhobidesk-title-group">
-          <h1>🧺 DhobiDesk</h1>
-          <p className="dhobidesk-subtitle">Smart Laundry Machine Monitoring & Booking System</p>
-        </div>
-        <div className="dhobidesk-user-actions">
-          <span className="user-badge">👤 {user.email}</span>
-          <button className="btn btn-outline btn-sm" onClick={enableNotifications}>
-            🔔 Notifications ({notifStatus})
-          </button>
-          <button className="btn btn-outline btn-sm" onClick={() => auth.signOut()}>
-            Sign out
-          </button>
-        </div>
-      </header>
+      {/* Main Content Area */}
+      <div className="main-content-wrapper">
+        {/* Top Navbar */}
+        <Navbar
+          user={user}
+          onLogout={onLogout}
+          unreadCount={unreadCount}
+          notifications={notifications}
+          onMarkAllNotifsRead={handleMarkAllRead}
+          onOpenBookingModal={() => handleOpenBookingModal()}
+          onOpenNotifsPage={() => setActiveSection('notifications')}
+          setIsMobileOpen={setIsMobileOpen}
+          activeSectionTitle={getSectionTitle()}
+        />
 
-      {/* SECTION 1: MY RESERVATIONS */}
-      <section className="section">
-        <div className="section-header">
-          <h2 className="section-title">📋 My Reservations</h2>
-        </div>
-
-        {/* Ready for Pickup Alert Card */}
-        {pickupBookings.map((b) => (
-          <div key={b.id} className="pickup-card">
-            <div className="pickup-info">
-              <h4>🧺 Laundry Ready for Pickup: {b.machineId}</h4>
-              <p>Your wash cycle has finished! Please collect your laundry promptly to free up the machine.</p>
-            </div>
-            <button
-              className="btn btn-success"
-              disabled={actionLoading?.id === b.id}
-              onClick={() => markCollected(b.id, b.machineId)}
-            >
-              {actionLoading?.id === b.id ? 'Updating...' : "✓ I've Collected"}
-            </button>
-          </div>
-        ))}
-
-        {/* Active Wash Countdown Card */}
-        {activeBooking && activeCountdown && (
-          <div className={`active-wash-card ${activeCountdown.isPaused ? 'paused' : 'running'}`}>
-            <div className="active-card-top">
-              <div className="active-machine-id">Active Wash: {activeBooking.machineId}</div>
-              <span className="status-pill" style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.4)' }}>
-                {activeCountdown.isPaused ? 'Power Cut (Paused)' : 'In Progress'}
+        {/* Viewport Content */}
+        <main className="content-viewport">
+          {/* Admin Banner if logged in as Admin */}
+          {isAdmin && (
+            <div className="admin-status-banner" style={{ background: 'var(--gold-cream)', border: '1px solid var(--primary-border)', color: 'var(--gold-dim)', marginBottom: 20 }}>
+              <ShieldAlert size={16} />
+              <span>
+                <strong>Administrator Mode Active:</strong> You have full privileges to monitor machine sensor telemetry, revoke any student's token, and resolve hardware faults.
               </span>
             </div>
+          )}
 
-            <div className="countdown-digits">
-              {activeCountdown.text}
-            </div>
+          {/* SECTION 1: DASHBOARD & FLEET OVERVIEW */}
+          {(activeSection === 'dashboard' || activeSection === 'machines') && (
+            <>
+              {/* Summary KPI Cards (Total, Available, Washing, Completed) */}
+              <SummaryCards machines={machines} bookings={bookings} />
 
-            {activeCountdown.isPaused && (
-              <div className="pause-banner">
-                <span>⏸</span> Power lost on machine. Cycle is paused and will automatically resume once power returns.
-              </div>
-            )}
+              {/* Washing Machines Section Header with Filters */}
+              <div className="machines-grid-header">
+                <div className="machines-grid-title">
+                  <h2>{isAdmin ? 'Fleet Operations & Telemetry Status' : 'Campus Washing Machines Fleet'}</h2>
+                  <p>
+                    {isAdmin 
+                      ? 'Inspect live sensor streams (RPM, Vibration, Temp, Water) and manage machine states'
+                      : 'Check real-time machine availability, cycle countdowns, and book your slot'}
+                  </p>
+                </div>
 
-            {activeBooking.shifted && (
-              <div>
-                <span className="shifted-badge">⚡ Completion time shifted due to power cut recovery</span>
-              </div>
-            )}
-
-            {activeBooking.expectedEndAt && (
-              <div className="active-card-meta">
-                Expected Completion:{' '}
-                <strong>
-                  {new Date(
-                    activeBooking.expectedEndAt.toMillis
-                      ? activeBooking.expectedEndAt.toMillis()
-                      : activeBooking.expectedEndAt.seconds * 1000
-                  ).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                </strong>
-              </div>
-            )}
-
-            <div className="active-card-actions">
-              <button
-                className="btn btn-danger btn-sm"
-                disabled={actionLoading?.id === activeBooking.id}
-                onClick={() => cancelBooking(activeBooking.id, activeBooking.machineId)}
-              >
-                {actionLoading?.id === activeBooking.id ? 'Cancelling...' : 'Cancel Reservation'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Queued Reservations List */}
-        {queuedBookings.length > 0 && (
-          <div>
-            <h3 style={{ fontSize: 16, margin: '16px 0 12px 0', color: 'var(--text-main)', fontWeight: 600 }}>
-              Queued Reservations ({queuedBookings.length})
-            </h3>
-            <div className="queued-grid">
-              {queuedBookings.map((b) => (
-                <div key={b.id} className="queued-card">
-                  <div className="queued-card-header">
-                    <strong style={{ fontSize: 16 }}>{b.machineId}</strong>
-                    <span className="queue-pos-badge">Queue #{b.queuePosition || 1}</span>
+                <div className="filters-bar-wrapper">
+                  {/* Floor Filters */}
+                  <div className="filter-pills-group">
+                    {['All', 'Floor 1', 'Floor 2', 'Floor 3'].map((f) => (
+                      <button
+                        key={f}
+                        type="button"
+                        className={`filter-pill-btn ${selectedFloor === f ? 'active' : ''}`}
+                        onClick={() => setSelectedFloor(f)}
+                      >
+                        {f}
+                      </button>
+                    ))}
                   </div>
-                  <div className="queued-time">
-                    {b.estimatedStartAt ? (
-                      <>
-                        Est. Start:{' '}
-                        <strong>
-                          {new Date(
-                            b.estimatedStartAt.toMillis
-                              ? b.estimatedStartAt.toMillis()
-                              : b.estimatedStartAt.seconds * 1000
-                          ).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </strong>
-                      </>
-                    ) : (
-                      'Awaiting machine availability'
-                    )}
+
+                  {/* Status Filters */}
+                  <div className="filter-pills-group">
+                    {[
+                      { key: 'All', label: 'All Status' },
+                      { key: 'IDLE', label: 'Available' },
+                      { key: 'WASHING', label: 'Washing' },
+                      { key: 'SPINNING', label: 'Spinning' },
+                      { key: 'COMPLETED', label: 'Ready' },
+                      { key: 'OFFLINE', label: 'Offline' },
+                    ].map((s) => (
+                      <button
+                        key={s.key}
+                        type="button"
+                        className={`filter-pill-btn ${selectedStatus === s.key ? 'active' : ''}`}
+                        onClick={() => setSelectedStatus(s.key)}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
                   </div>
-                  <button
-                    className="btn btn-outline btn-sm"
-                    style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}
-                    disabled={actionLoading?.id === b.id}
-                    onClick={() => cancelBooking(b.id, b.machineId)}
+
+                  {/* Search Bar */}
+                  <div className="search-box-field">
+                    <Search size={15} className="search-icon" />
+                    <input
+                      type="text"
+                      placeholder="Search washer, floor, room..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="search-input"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Responsive 6 Machines Grid */}
+              {filteredMachines.length === 0 ? (
+                <div className="empty-state-card">
+                  <Layers size={40} className="empty-icon" />
+                  <h3>No washing machines match your filter</h3>
+                  <p>Try resetting the floor or status filter to see all campus units.</p>
+                  <button 
+                    type="button" 
+                    className="btn-secondary"
+                    onClick={() => { setSelectedFloor('All'); setSelectedStatus('All'); setSearchQuery(''); }}
+                    style={{ marginTop: 14 }}
                   >
-                    {actionLoading?.id === b.id ? 'Cancelling...' : 'Cancel Queue Slot'}
+                    Reset All Filters
                   </button>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Empty state when no active or queued bookings */}
-        {!activeBooking && queuedBookings.length === 0 && pickupBookings.length === 0 && (
-          <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '8px 0 20px 0' }}>
-            You have no active or queued reservations. Book an available machine below!
-          </p>
-        )}
-      </section>
-
-      {/* SECTION 2: MACHINE STATUS & BOOKING */}
-      <section className="section">
-        <div className="section-header">
-          <h2 className="section-title">⚡ Machine Status & Availability</h2>
-        </div>
-
-        {machines.length === 0 && (
-          <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No machines reporting yet. Run simulation to start telemetry.</p>
-        )}
-
-        <div className="machine-grid">
-          {machines.map((m) => {
-            const waitInfo = getMachineWaitInfo(m, now);
-            const isOffline = m.status === 'offline';
-            const isBookingThis = actionLoading?.type === 'book' && actionLoading?.id === m.id;
-
-            return (
-              <div key={m.id} className="machine-card">
-                <div>
-                  <div className="machine-card-top">
-                    <h3 className="machine-name">{m.id}</h3>
-                    <span className={`status-pill ${m.status || 'offline'}`}>
-                      {m.status || 'unknown'}
-                    </span>
-                  </div>
-
-                  <div className="machine-wait-box">
-                    <div className="wait-label">Wait Estimate</div>
-                    <div className={`wait-value ${waitInfo.badgeClass}`}>
-                      {waitInfo.text}
-                    </div>
-                  </div>
+              ) : (
+                <div className="washing-machines-grid">
+                  {filteredMachines.map((machine) => (
+                    <MachineCard
+                      key={machine.id}
+                      machine={machine}
+                      onBookClick={handleOpenBookingModal}
+                      onCollectClick={handleCollectLaundry}
+                      currentUserId={user?.uid}
+                      isAdmin={isAdmin}
+                      onAdminStatusOverride={handleUpdateMachineStatus}
+                      onAdminRevokeActiveCycle={handleAdminRevokeActiveCycle}
+                    />
+                  ))}
                 </div>
+              )}
+            </>
+          )}
 
-                <button
-                  className={`btn ${waitInfo.isAvailable ? 'btn-success' : isOffline ? 'btn-outline' : 'btn-primary'}`}
-                  style={{ width: '100%', marginTop: 8 }}
-                  disabled={isBookingThis}
-                  onClick={() => bookMachine(m.id)}
-                >
-                  {isBookingThis
-                    ? 'Booking...'
-                    : waitInfo.isAvailable
-                    ? 'Book My Slot'
-                    : isOffline
-                    ? 'Book Slot (Queue while Offline)'
-                    : 'Book Slot (Join Queue)'}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </section>
+          {/* SECTION: STUDENT APPROVALS VIEW (ADMIN ONLY) */}
+          {activeSection === 'approvals' && isAdmin && (
+            <ApprovalsView
+              pendingUsers={pendingUsers}
+              registeredUsers={registeredUsers}
+              onApproveStudent={onApproveStudent}
+              onRejectStudent={onRejectStudent}
+            />
+          )}
 
-      {/* SECTION 3: BOOKING HISTORY */}
-      <section className="section">
-        <div className="section-header">
-          <h2 className="section-title">📜 Booking History</h2>
-          <div className="filter-pills">
-            <button
-              className={`filter-pill ${historyFilter === 'all' ? 'active' : ''}`}
-              onClick={() => setHistoryFilter('all')}
-            >
-              All ({bookings.length})
-            </button>
-            <button
-              className={`filter-pill ${historyFilter === 'active_queued' ? 'active' : ''}`}
-              onClick={() => setHistoryFilter('active_queued')}
-            >
-              Active & Queued ({(activeBooking ? 1 : 0) + queuedBookings.length})
-            </button>
-            <button
-              className={`filter-pill ${historyFilter === 'past' ? 'active' : ''}`}
-              onClick={() => setHistoryFilter('past')}
-            >
-              Past / Completed ({historyBookings.length})
-            </button>
-          </div>
-        </div>
+          {/* SECTION 2: FAULTS VIEW (ADMIN ONLY) */}
+          {activeSection === 'faults' && isAdmin && (
+            <FaultsView
+              faults={faults}
+              machines={machines}
+              onResolveFault={handleResolveFault}
+              onUpdateMachineStatus={handleUpdateMachineStatus}
+            />
+          )}
 
-        {displayedBookings.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>
-            {historyFilter === 'past'
-              ? 'No completed or collected bookings yet.'
-              : 'No bookings found in this view.'}
-          </p>
-        ) : (
-          <div className="table-responsive">
-            <table className="history-table">
-              <thead>
-                <tr>
-                  <th>Machine</th>
-                  <th>Status</th>
-                  <th>Timing / Schedule</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayedBookings.map((b) => (
-                  <tr key={b.id}>
-                    <td>
-                      <strong>{b.machineId}</strong>
-                    </td>
-                    <td>
-                      <span className={`status-pill ${b.status}`}>
-                        {b.status}
-                      </span>
-                      {b.shifted && (
-                        <span style={{ marginLeft: 6, fontSize: 11, color: '#f59e0b', fontWeight: 600 }}>
-                          shifted
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ fontFamily: 'monospace', fontSize: 13 }}>
-                      {formatSchedule(b, now)}
-                    </td>
-                    <td>
-                      {b.status === 'done' ? (
-                        <button
-                          className="btn btn-success btn-sm"
-                          disabled={actionLoading?.id === b.id}
-                          onClick={() => markCollected(b.id, b.machineId)}
-                        >
-                          {actionLoading?.id === b.id ? 'Saving...' : "✓ I've Collected"}
-                        </button>
-                      ) : b.status === 'active' || b.status === 'queued' ? (
-                        <button
-                          className="btn btn-outline btn-sm"
-                          style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}
-                          disabled={actionLoading?.id === b.id}
-                          onClick={() => cancelBooking(b.id, b.machineId)}
-                        >
-                          {actionLoading?.id === b.id ? '...' : 'Cancel'}
-                        </button>
-                      ) : (
-                        <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>—</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+          {/* SECTION 3: BOOKINGS VIEW */}
+          {activeSection === 'bookings' && (
+            <BookingsView
+              bookings={bookings}
+              machines={machines}
+              currentUser={user}
+              onCancelBooking={handleCancelBooking}
+              onOpenBookingModal={() => handleOpenBookingModal()}
+            />
+          )}
+
+          {/* SECTION 4: NOTIFICATIONS VIEW */}
+          {activeSection === 'notifications' && (
+            <NotificationsView
+              notifications={notifications}
+              onMarkAllRead={handleMarkAllRead}
+              onMarkOneRead={handleMarkOneRead}
+              onClearAllNotifs={handleClearAllNotifs}
+            />
+          )}
+
+          {/* SECTION 5: PROFILE VIEW */}
+          {activeSection === 'profile' && (
+            <ProfileView
+              user={user}
+              onUpdateUser={onUpdateUser}
+              bookings={bookings}
+            />
+          )}
+        </main>
+      </div>
+
+      {/* Booking Modal */}
+      <BookingModal
+        isOpen={isBookingModalOpen}
+        onClose={() => setIsBookingModalOpen(false)}
+        machines={machines}
+        initialMachine={selectedMachineForBooking}
+        existingBookings={bookings}
+        currentUser={user}
+        onConfirmBooking={handleConfirmBooking}
+      />
+
+      {/* Admin Operations Modal (Passcode 1234) */}
+      <AdminModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        machines={machines}
+        bookings={bookings}
+        onUpdateMachineStatus={handleUpdateMachineStatus}
+        onForceCancelBooking={handleCancelBooking}
+        onResetAllMachines={handleResetAllMachines}
+      />
     </div>
   );
 }
-
-export default Dashboard;

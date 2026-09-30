@@ -315,8 +315,47 @@ async function syncMachineQueue(machineId) {
   }
 }
 
+const DEFAULT_FLEET = [
+  { id: 'machine_01', type: 'Top Load', floor: 'Floor 1', capacityKg: 7, cycleDurationMinutes: 30 },
+  { id: 'machine_02', type: 'Front Load', floor: 'Floor 1', capacityKg: 8, cycleDurationMinutes: 35 },
+  { id: 'machine_03', type: 'Top Load', floor: 'Floor 2', capacityKg: 7, cycleDurationMinutes: 30 },
+  { id: 'machine_04', type: 'Front Load', floor: 'Floor 2', capacityKg: 8, cycleDurationMinutes: 35 },
+  { id: 'machine_05', type: 'Heavy Duty', floor: 'Floor 3', capacityKg: 10, cycleDurationMinutes: 45 },
+  { id: 'machine_06', type: 'Express Wash', floor: 'Floor 3', capacityKg: 6, cycleDurationMinutes: 20 },
+];
+
+async function seedDefaultMachines() {
+  try {
+    for (const m of DEFAULT_FLEET) {
+      const docRef = db.collection('machines').doc(m.id);
+      const snap = await docRef.get();
+      if (!snap.exists) {
+        await docRef.set({
+          ...m,
+          status: 'idle',
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+          queueLength: 0,
+          hasActiveBooking: false,
+        });
+        console.log(`Initialized default machine ${m.id} (${m.type}, ${m.floor})`);
+      } else {
+        const data = snap.data();
+        await docRef.set({
+          type: data.type || m.type,
+          floor: data.floor || m.floor,
+          capacityKg: data.capacityKg || m.capacityKg,
+          cycleDurationMinutes: data.cycleDurationMinutes || m.cycleDurationMinutes,
+        }, { merge: true });
+      }
+    }
+  } catch (err) {
+    console.error('Error in seedDefaultMachines:', err.message);
+  }
+}
+
 async function syncAllMachines() {
   try {
+    await seedDefaultMachines();
     const machinesSnap = await db.collection('machines').get();
     for (const doc of machinesSnap.docs) {
       await syncMachineQueue(doc.id);
@@ -696,6 +735,206 @@ app.post('/markCollected', authenticateUser, async (req, res) => {
       return res.status(err.statusCode).json({ error: err.message });
     }
     res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// ---------------------------------------------------------------------
+// PART D — Admin Management API (Passcode: 1234)
+// ---------------------------------------------------------------------
+const ADMIN_PASSCODE = process.env.ADMIN_PASSCODE || '1234';
+
+function verifyAdmin(req, res, next) {
+  const passcode = req.headers['x-admin-passcode'] || req.query.passcode || req.body?.adminPasscode;
+  if (passcode !== ADMIN_PASSCODE) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid admin passcode' });
+  }
+  next();
+}
+
+// POST /admin/verify — Check if passcode 1234 is correct
+app.post('/admin/verify', (req, res) => {
+  const { passcode } = req.body;
+  if (passcode === ADMIN_PASSCODE) {
+    return res.json({ success: true, message: 'Admin authenticated' });
+  }
+  return res.status(401).json({ error: 'Invalid admin passcode' });
+});
+
+// GET /admin/overview — Return all machines, all live bookings, and stats
+app.get('/admin/overview', verifyAdmin, async (req, res) => {
+  try {
+    const [machinesSnap, activeBookingsSnap, queuedBookingsSnap, doneBookingsSnap] = await Promise.all([
+      db.collection('machines').get(),
+      db.collection('bookings').where('status', '==', 'active').get(),
+      db.collection('bookings').where('status', '==', 'queued').get(),
+      db.collection('bookings').where('status', '==', 'done').get(),
+    ]);
+
+    const machines = machinesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const bookings = [
+      ...activeBookingsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      ...queuedBookingsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      ...doneBookingsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    ];
+
+    const today = new Date().toISOString().slice(0, 10);
+    const usersSnap = await db.collection('users').get();
+    let totalBookingsToday = 0;
+    usersSnap.docs.forEach((d) => {
+      const u = d.data();
+      if (u.lastBookingDate === today) {
+        totalBookingsToday += u.dailyBookingCount || 0;
+      }
+    });
+
+    const stats = {
+      totalMachines: machines.length,
+      activeMachines: machines.filter((m) => m.status === 'washing' || m.status === 'spinning').length,
+      idleMachines: machines.filter((m) => m.status === 'idle').length,
+      maintenanceMachines: machines.filter((m) => m.status === 'maintenance').length,
+      offlineMachines: machines.filter((m) => m.status === 'offline').length,
+      totalQueued: queuedBookingsSnap.size,
+      totalActiveWashes: activeBookingsSnap.size,
+      readyForPickup: doneBookingsSnap.size,
+      totalBookingsToday,
+    };
+
+    res.json({ machines, bookings, stats });
+  } catch (err) {
+    console.error('admin overview error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch admin overview' });
+  }
+});
+
+// POST /admin/setMachineStatus — Override machine status or cycle duration
+app.post('/admin/setMachineStatus', verifyAdmin, async (req, res) => {
+  try {
+    const { machineId, status, cycleDurationMinutes, floor, type } = req.body;
+    if (!machineId) return res.status(400).json({ error: 'machineId required' });
+
+    const machineRef = db.collection('machines').doc(machineId);
+    const updatePayload = {
+      lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (status) updatePayload.status = status;
+    if (cycleDurationMinutes) updatePayload.cycleDurationMinutes = Number(cycleDurationMinutes);
+    if (floor) updatePayload.floor = floor;
+    if (type) updatePayload.type = type;
+
+    await machineRef.set(updatePayload, { merge: true });
+    await syncMachineQueue(machineId);
+
+    res.json({ success: true, machineId, updated: updatePayload });
+  } catch (err) {
+    console.error('admin setMachineStatus error:', err.message);
+    res.status(500).json({ error: 'Failed to update machine status' });
+  }
+});
+
+// POST /admin/addMachine — Register new machine in fleet
+app.post('/admin/addMachine', verifyAdmin, async (req, res) => {
+  try {
+    const { id, type, floor, capacityKg, cycleDurationMinutes } = req.body;
+    if (!id) return res.status(400).json({ error: 'id required' });
+
+    const machineRef = db.collection('machines').doc(id);
+    const snap = await machineRef.get();
+    if (snap.exists) return res.status(400).json({ error: `Machine ${id} already exists` });
+
+    const newMachine = {
+      type: type || 'Top Load',
+      floor: floor || 'Floor 1',
+      capacityKg: Number(capacityKg) || 7,
+      cycleDurationMinutes: Number(cycleDurationMinutes) || 30,
+      status: 'idle',
+      lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+      queueLength: 0,
+      hasActiveBooking: false,
+    };
+
+    await machineRef.set(newMachine);
+    await syncMachineQueue(id);
+
+    res.json({ success: true, machine: { id, ...newMachine } });
+  } catch (err) {
+    console.error('admin addMachine error:', err.message);
+    res.status(500).json({ error: 'Failed to add machine' });
+  }
+});
+
+// POST /admin/forceCancelBooking — Admin cancels an active/queued booking
+app.post('/admin/forceCancelBooking', verifyAdmin, async (req, res) => {
+  try {
+    const { bookingId } = req.body;
+    if (!bookingId) return res.status(400).json({ error: 'bookingId required' });
+
+    const bookingRef = db.collection('bookings').doc(bookingId);
+    let promotedUserId = null;
+    let targetMachineId = null;
+
+    await db.runTransaction(async (transaction) => {
+      const snap = await transaction.get(bookingRef);
+      if (!snap.exists) throw new Error('Booking not found');
+
+      const booking = snap.data();
+      targetMachineId = booking.machineId;
+      const wasActive = booking.status === 'active';
+
+      transaction.update(bookingRef, {
+        status: 'cancelled',
+        cancelledBy: 'admin',
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      const queuedSnap = await transaction.get(
+        db.collection('bookings')
+          .where('machineId', '==', targetMachineId)
+          .where('status', '==', 'queued')
+          .orderBy('queuePosition')
+      );
+
+      const remainingQueued = queuedSnap.docs.filter((d) => d.id !== bookingId);
+
+      if (wasActive && remainingQueued.length > 0) {
+        const nextDoc = remainingQueued[0];
+        promotedUserId = nextDoc.data().userId;
+        const nowMs = Date.now();
+        const cycleDurationMinutes = 30;
+        const startedAt = admin.firestore.Timestamp.fromMillis(nowMs);
+        const expectedEndAt = admin.firestore.Timestamp.fromMillis(nowMs + cycleDurationMinutes * 60 * 1000);
+
+        transaction.update(nextDoc.ref, {
+          status: 'active',
+          queuePosition: 0,
+          promotedAt: admin.firestore.FieldValue.serverTimestamp(),
+          startedAt,
+          expectedEndAt,
+          estimatedStartAt: null,
+          machineOffline: false,
+        });
+
+        for (let i = 1; i < remainingQueued.length; i++) {
+          const estStartMs = expectedEndAt.toMillis() + (i - 1) * cycleDurationMinutes * 60 * 1000;
+          transaction.update(remainingQueued[i].ref, {
+            queuePosition: i,
+            estimatedStartAt: admin.firestore.Timestamp.fromMillis(estStartMs),
+          });
+        }
+      }
+    });
+
+    if (promotedUserId) {
+      await sendPushNotification(promotedUserId, 'Machine is free', 'It is now your turn — machine is available.');
+    }
+
+    if (targetMachineId) {
+      await syncMachineQueue(targetMachineId);
+    }
+
+    res.json({ success: true, bookingId, message: 'Booking force-cancelled by admin' });
+  } catch (err) {
+    console.error('admin forceCancelBooking error:', err.message);
+    res.status(500).json({ error: err.message || 'Failed to force cancel booking' });
   }
 });
 
