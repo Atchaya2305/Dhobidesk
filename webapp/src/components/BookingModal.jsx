@@ -151,7 +151,7 @@ export default function BookingModal({
                     }}
                   >
                     <div className="tile-top">
-                      <span className="tile-num">M{m.machineNumber}</span>
+                      <span className="tile-num">No. {m.machineNumber}</span>
                       <span className={`tile-status ${m.status.toLowerCase()}`}>
                         {m.status}
                       </span>

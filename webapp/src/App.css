@@ -1271,18 +1271,32 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
 .machine-header-left {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+}
+
+.machine-title-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.machine-unit-label {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--gold-dim);
+  margin-bottom: 2px;
 }
 
 .machine-num-badge {
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--radius-md);
   background: var(--bg-subtle);
   border: 1px solid var(--border-light);
@@ -1295,20 +1309,20 @@
 }
 
 .num-prefix {
-  font-size: 9.5px;
+  font-size: 9px;
   font-weight: 700;
   color: var(--text-subtle);
 }
 
 .num-value {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   font-family: var(--font-mono);
   color: var(--text-navy);
 }
 
 .machine-name {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--text-navy);
   margin-bottom: 3px;
@@ -1389,6 +1403,612 @@
 .dot-spinning { background: var(--status-spinning); animation: pulse-ring 1.2s infinite; }
 .dot-completed { background: var(--status-completed); }
 .dot-offline { background: var(--status-offline); }
+
+/* =========================================================
+   PICTORIAL LUXURY WASHING MACHINE VISUAL
+   ========================================================= */
+.washer-stage {
+  height: 204px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #FBF8F3 0%, #F5EFEB 100%);
+  border: 1px solid #ECE3D4;
+  border-radius: 12px;
+  margin-bottom: 14px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.02);
+}
+
+.washer-ground-shadow {
+  position: absolute;
+  bottom: 8px;
+  width: 136px;
+  height: 12px;
+  background: radial-gradient(ellipse at center, rgba(60, 45, 20, 0.16) 0%, rgba(60, 45, 20, 0) 72%);
+  border-radius: 50%;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.luxury-washer {
+  position: relative;
+  z-index: 2;
+  width: 142px;
+  height: 170px;
+  background: linear-gradient(155deg, #FFFFFF 0%, #FAF7F2 42%, #EFE8DD 100%);
+  border: 2.5px solid #D6C7B2;
+  border-radius: 11px;
+  padding: 8px 9px 6px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -2px 4px rgba(184, 138, 46, 0.08),
+    0 8px 18px rgba(70, 50, 20, 0.07);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.25s ease;
+}
+
+/* Subtle physical vibration when machine is spinning */
+.luxury-washer.spinning {
+  animation: washer-rumble 0.18s infinite alternate ease-in-out;
+}
+
+@keyframes washer-rumble {
+  0% { transform: translate(-0.6px, 0.2px); }
+  100% { transform: translate(0.6px, -0.2px); }
+}
+
+/* Top Control Console */
+.washer-control-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 16px;
+  margin-bottom: 5px;
+}
+
+.washer-logo {
+  color: #997324;
+  font-size: 7.5px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  font-family: var(--font-body);
+}
+
+.washer-knob {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #FFFFFF 0%, #D8C8B0 60%, #A89578 100%);
+  border: 1.5px solid #B88A2E;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  position: relative;
+}
+
+.washer-knob::after {
+  content: '';
+  position: absolute;
+  top: 1.5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1.5px;
+  height: 3px;
+  background: #997324;
+  border-radius: 1px;
+}
+
+.washer-leds {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.led-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #D8CEBD;
+  transition: all 0.3s ease;
+}
+
+.led-dot.active-green {
+  background: #10B981;
+  box-shadow: 0 0 5px rgba(16, 185, 129, 0.85);
+}
+
+.led-dot.active-amber {
+  background: #F59E0B;
+  box-shadow: 0 0 5px rgba(245, 158, 11, 0.85);
+  animation: pulse-ring 1.5s infinite;
+}
+
+.led-dot.active-blue {
+  background: #3B82F6;
+  box-shadow: 0 0 5px rgba(59, 130, 246, 0.85);
+}
+
+.led-dot.active-red {
+  background: #EF4444;
+  box-shadow: 0 0 5px rgba(239, 68, 68, 0.85);
+}
+
+/* Washer Digital OLED Display */
+.washer-digital-screen {
+  height: 16px;
+  background: #171513;
+  border: 1px solid #3A3530;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 7px;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+}
+
+.digital-text {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+}
+
+.digital-text.pulse-text {
+  color: #60A5FA;
+  animation: pulse-ring 2s infinite;
+}
+
+.digital-text.green-text { color: #34D399; }
+.digital-text.gold-text { color: #FBBF24; }
+.digital-text.red-text { color: #F87171; }
+
+/* Circular Porthole Door with Drum */
+.luxury-door {
+  width: 94px;
+  height: 94px;
+  border-radius: 50%;
+  margin: 0 auto;
+  position: relative;
+  background: linear-gradient(145deg, #D4AF37 0%, #997324 100%);
+  padding: 3.5px;
+  box-shadow: 0 4px 10px rgba(70, 50, 20, 0.18), inset 0 1px 1px rgba(255, 255, 255, 0.6);
+}
+
+.door-rim-outer {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #25221F;
+  padding: 3px;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.6);
+}
+
+.door-glass {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  overflow: hidden;
+  position: relative;
+  background: radial-gradient(circle at 35% 30%, #36322E 0%, #1C1917 58%, #0C0A09 100%);
+  box-shadow: inset 0 0 10px rgba(0,0,0,0.85);
+}
+
+/* Curved 3D Glass Reflection */
+.glass-reflection-shine {
+  position: absolute;
+  top: 4px;
+  left: 9px;
+  width: 13px;
+  height: 60px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.01) 100%);
+  border-radius: 8px;
+  transform: rotate(32deg);
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Active Washing State in Drum */
+.drum-wash-content {
+  position: absolute;
+  inset: 0;
+}
+
+.water-slosh-layer {
+  position: absolute;
+  bottom: -4px;
+  left: -20%;
+  width: 140%;
+  height: 42px;
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.45) 0%, rgba(14, 165, 233, 0.75) 100%);
+  border-radius: 42% 46% 0 0;
+  animation: slosh-water 2.8s infinite alternate ease-in-out;
+}
+
+@keyframes slosh-water {
+  0% { transform: rotate(-5deg) translateY(0); }
+  50% { transform: rotate(4deg) translateY(-3px); }
+  100% { transform: rotate(-3deg) translateY(1px); }
+}
+
+.clothes-tumble-item {
+  position: absolute;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.35);
+}
+
+.clothes-tumble-item.item-1 {
+  width: 30px;
+  height: 18px;
+  background: linear-gradient(135deg, #FDE047, #CA8A04);
+  border-radius: 12px 6px 14px 8px;
+  top: 26px;
+  left: 18px;
+  animation: tumble-anim 3.2s infinite ease-in-out;
+}
+
+.clothes-tumble-item.item-2 {
+  width: 24px;
+  height: 16px;
+  background: linear-gradient(135deg, #93C5FD, #2563EB);
+  border-radius: 8px 14px 6px 12px;
+  top: 36px;
+  left: 38px;
+  animation: tumble-anim-rev 3.8s infinite ease-in-out;
+}
+
+@keyframes tumble-anim {
+  0% { transform: rotate(0deg) translate(0, 0); }
+  25% { transform: rotate(90deg) translate(6px, -4px); }
+  50% { transform: rotate(180deg) translate(-4px, 6px); }
+  75% { transform: rotate(270deg) translate(-6px, -2px); }
+  100% { transform: rotate(360deg) translate(0, 0); }
+}
+
+@keyframes tumble-anim-rev {
+  0% { transform: rotate(360deg) translate(0, 0); }
+  50% { transform: rotate(180deg) translate(4px, 5px); }
+  100% { transform: rotate(0deg) translate(0, 0); }
+}
+
+.soap-bubble {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 0 3px rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+}
+
+.soap-bubble.bubble-a {
+  width: 7px;
+  height: 7px;
+  bottom: 22px;
+  left: 28px;
+  animation: bubble-up 2.2s infinite ease-in-out;
+}
+
+.soap-bubble.bubble-b {
+  width: 5px;
+  height: 5px;
+  bottom: 18px;
+  right: 26px;
+  animation: bubble-up 2.6s 0.7s infinite ease-in-out;
+}
+
+@keyframes bubble-up {
+  0% { transform: translateY(0) scale(0.8); opacity: 0.2; }
+  50% { opacity: 0.9; }
+  100% { transform: translateY(-16px) scale(1.1); opacity: 0; }
+}
+
+/* High Speed Spinning Vortex State */
+.drum-spin-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.spin-vortex-ring {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  border: 2px dashed rgba(192, 132, 252, 0.55);
+  animation: spin-clockwise 0.7s infinite linear;
+}
+
+.clothes-spin-blur {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(234, 179, 8, 0.6), rgba(59, 130, 246, 0.7), rgba(168, 85, 247, 0.6), rgba(234, 179, 8, 0.6));
+  filter: blur(2.5px);
+  animation: spin-clockwise 0.45s infinite linear;
+}
+
+@keyframes spin-clockwise {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Idle Ready Drum State */
+.drum-idle-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stainless-rib-circle {
+  position: absolute;
+  inset: 10px;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(214, 199, 178, 0.3);
+}
+
+.idle-ready-pill {
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: rgba(16, 185, 129, 0.16);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  color: #34D399;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  font-family: var(--font-mono);
+}
+
+/* Completed Done Drum State */
+.drum-done-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clean-folded-laundry {
+  width: 34px;
+  height: 22px;
+  background: linear-gradient(135deg, #FAF5FF, #E9D5FF);
+  border-radius: 4px;
+  border: 1px solid #D8B4FE;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+.done-sparkle-icon {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  color: #FBBF24;
+  animation: pulse-ring 2s infinite;
+}
+
+/* Offline Drum State */
+.drum-offline-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.drum-offline-icon {
+  color: #F87171;
+  opacity: 0.85;
+}
+
+/* Washer Base Trim & Feet */
+.washer-base-trim {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: auto;
+  padding-top: 3px;
+  position: relative;
+}
+
+.washer-drain-filter-cap {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #C4B59F;
+  border: 1px solid #997324;
+  margin-left: 2px;
+}
+
+.washer-feet {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  position: absolute;
+  bottom: -9px;
+  left: 0;
+  padding: 0 10px;
+}
+
+.washer-foot {
+  width: 14px;
+  height: 3px;
+  background: #25221F;
+  border-radius: 1px;
+}
+
+/* =========================================================
+   FRIENDLY PICTORIAL STATUS DESCRIPTOR BANNER
+   ========================================================= */
+.pictorial-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  margin-bottom: 14px;
+  transition: all 0.2s ease;
+}
+
+.banner-idle {
+  background: #F0FDF4;
+  border: 1px solid #BBF7D0;
+}
+
+.banner-washing {
+  background: #EFF6FF;
+  border: 1px solid #BFDBFE;
+}
+
+.banner-spinning {
+  background: #FAF5FF;
+  border: 1px solid #E9D5FF;
+}
+
+.banner-completed {
+  background: #FFFBEB;
+  border: 1px solid #FDE68A;
+}
+
+.banner-offline {
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+}
+
+.pictorial-icon-wrapper {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.pictorial-icon.emerald {
+  background: #DCFCE7;
+  color: #15803D;
+  border-radius: 8px;
+  padding: 7px;
+  width: 32px;
+  height: 32px;
+}
+
+.pictorial-icon.blue {
+  background: #DBEAFE;
+  color: #1D4ED8;
+  border-radius: 8px;
+  padding: 7px;
+  width: 32px;
+  height: 32px;
+}
+
+.pictorial-icon.purple {
+  background: #F3E8FF;
+  color: #7E22CE;
+  border-radius: 8px;
+  padding: 7px;
+  width: 32px;
+  height: 32px;
+}
+
+.pictorial-icon.amber {
+  background: #FEF3C7;
+  color: #B45309;
+  border-radius: 8px;
+  padding: 7px;
+  width: 32px;
+  height: 32px;
+}
+
+.pictorial-icon.rose {
+  background: #FEE2E2;
+  color: #B91C1C;
+  border-radius: 8px;
+  padding: 7px;
+  width: 32px;
+  height: 32px;
+}
+
+.pictorial-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pictorial-main-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-navy);
+  line-height: 1.3;
+}
+
+.pictorial-sub-text {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.25;
+}
+
+/* =========================================================
+   OPTIONAL SENSOR DIAGNOSTICS DRAWER (ADMIN ONLY)
+   ========================================================= */
+.admin-diagnostics-drawer {
+  margin-bottom: 14px;
+}
+
+.btn-toggle-diagnostics {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-toggle-diagnostics:hover {
+  background: var(--bg-hover);
+  border-color: var(--gold-border);
+  color: var(--gold-dim);
+}
+
+.admin-sensor-mini-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #FAF7F2;
+  border: 1px dashed #D6C7B2;
+  border-radius: 6px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.sensor-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10.5px;
+  padding: 2px 4px;
+}
+
+.sensor-name {
+  color: var(--text-subtle);
+  font-weight: 600;
+}
+
+.sensor-value {
+  color: var(--text-navy);
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
 
 /* Progress Bar */
 .machine-progress-section {

@@ -140,7 +140,7 @@ export default function AdminModal({
                     <tr key={m.id}>
                       <td>
                         <strong>{m.name}</strong>
-                        <div className="sub-text">M{m.machineNumber} • {m.type}</div>
+                        <div className="sub-text">No. {m.machineNumber} • {m.type}</div>
                       </td>
                       <td>{m.floor}</td>
                       <td>
