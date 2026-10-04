@@ -123,14 +123,18 @@ export default function MachineCard({
         </div>
       )}
 
-      {/* Header: Machine Name, Floor & Status */}
+      {/* Header: Machine Name, Big Unit Number & Status */}
       <div className="machine-card-header">
         <div className="machine-header-left">
           <div className="machine-title-group">
-            <span className="machine-unit-label">WASHING MACHINE NO. {machineNumber}</span>
-            <h3 className="machine-name">{name}</h3>
-            <div className="machine-meta-chips">
+            <span className="machine-eyebrow">WASHING MACHINE</span>
+            <div className="machine-heading-row">
+              <h2 className="machine-big-number">No. {machineNumber}</h2>
               <span className="floor-chip">{floor}</span>
+            </div>
+            <div className="machine-sub-row">
+              <span className="machine-model-text">{name}</span>
+              <span className="machine-spec-dot">•</span>
               <span className="capacity-chip">{type} • {capacityKg} kg</span>
             </div>
           </div>
@@ -143,118 +147,78 @@ export default function MachineCard({
         </div>
       </div>
 
-      {/* 2. PICTORIAL LUXURY WASHING MACHINE VISUAL */}
-      <div className={`washer-stage status-${status.toLowerCase()}`}>
-        <div className={`luxury-washer ${status.toLowerCase()} ${isOperating ? 'operating' : ''}`}>
-          {/* Washer Top Console */}
-          <div className="washer-control-panel">
-            <div className="washer-logo">DHOBIDESK</div>
-            <div className="washer-knob" />
-            <div className="washer-leds">
-              <span className={`led-dot ${isAvailable ? 'active-green' : isOperating ? 'active-amber' : isCompleted ? 'active-blue' : 'active-red'}`} />
-              <span className="led-dot" />
-              <span className="led-dot" />
-            </div>
-          </div>
+      {/* 2. REALISTIC LUXURY MACHINE PHOTO SHOWCASE */}
+      <div className={`machine-photo-showcase status-${status.toLowerCase()}`}>
+        <div className="photo-inner-wrapper">
+          <img
+            src={
+              status === 'WASHING'
+                ? '/assets/machines/washer-washing.jpg'
+                : status === 'SPINNING'
+                ? '/assets/machines/washer-spinning.jpg'
+                : status === 'COMPLETED'
+                ? '/assets/machines/washer-completed.jpg'
+                : '/assets/machines/washer-idle.jpg'
+            }
+            alt={`Washing Machine ${machineNumber} - ${status}`}
+            className={`machine-hero-image ${status.toLowerCase()} ${isOperating ? 'operating' : ''}`}
+            loading="lazy"
+          />
 
-          {/* Digital Screen Display */}
-          <div className="washer-digital-screen">
-            {isOperating && (
-              <span className="digital-text pulse-text">
-                {Math.ceil(remainingSeconds / 60) || 1} MIN
-              </span>
-            )}
-            {isAvailable && <span className="digital-text green-text">READY</span>}
-            {isCompleted && <span className="digital-text gold-text">DONE</span>}
-            {isOffline && <span className="digital-text red-text">OFFLINE</span>}
-          </div>
-
-          {/* Circular Porthole Door with Washing Drum */}
-          <div className="luxury-door">
-            <div className="door-rim-outer">
-              <div className={`door-glass status-${status.toLowerCase()}`}>
-                {/* Active Washing Drum with sloshing water and tumbling clothes */}
-                {status === 'WASHING' && (
-                  <div className="drum-wash-content">
-                    <div className="water-slosh-layer" />
-                    <div className="clothes-tumble-item item-1" />
-                    <div className="clothes-tumble-item item-2" />
-                    <div className="soap-bubble bubble-a" />
-                    <div className="soap-bubble bubble-b" />
-                  </div>
-                )}
-
-                {/* High Speed Spin Drum */}
-                {status === 'SPINNING' && (
-                  <div className="drum-spin-content">
-                    <div className="spin-vortex-ring" />
-                    <div className="clothes-spin-blur" />
-                  </div>
-                )}
-
-                {/* Idle Ready Drum */}
-                {isAvailable && (
-                  <div className="drum-idle-content">
-                    <div className="stainless-rib-circle" />
-                    <span className="idle-ready-pill">READY</span>
-                  </div>
-                )}
-
-                {/* Completed Drum */}
-                {isCompleted && (
-                  <div className="drum-done-content">
-                    <div className="clean-folded-laundry" />
-                    <Sparkles size={16} className="done-sparkle-icon" />
-                  </div>
-                )}
-
-                {/* Offline Drum */}
-                {isOffline && (
-                  <div className="drum-offline-content">
-                    <AlertOctagon size={24} className="drum-offline-icon" />
-                  </div>
-                )}
-
-                {/* 3D Glass curved reflection */}
-                <div className="glass-reflection-shine" />
+          {/* Floating Live State Pill */}
+          {isOperating && (
+            <div className="floating-photo-pill pill-timer">
+              <Clock size={15} className="pulse-icon" />
+              <div className="pill-timer-text">
+                <span className="pill-label">REMAINING TIME</span>
+                <strong className="pill-digits">{formatTime(remainingSeconds)}</strong>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* Washer Base & Feet */}
-          <div className="washer-base-trim">
-            <span className="washer-drain-filter-cap" />
-            <div className="washer-feet">
-              <span className="washer-foot left" />
-              <span className="washer-foot right" />
+          {isAvailable && (
+            <div className="floating-photo-pill pill-ready">
+              <CheckCircle2 size={15} />
+              <span>CLEAN DRUM READY</span>
             </div>
-          </div>
-        </div>
+          )}
 
-        {/* Soft Ground Shadow */}
-        <div className="washer-ground-shadow" />
+          {isCompleted && (
+            <div className="floating-photo-pill pill-done">
+              <Sparkles size={15} />
+              <span>CYCLE COMPLETED</span>
+            </div>
+          )}
+
+          {isOffline && (
+            <div className="floating-photo-pill pill-offline">
+              <AlertOctagon size={15} />
+              <span>OUT OF SERVICE</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 3. FRIENDLY PICTORIAL STATUS DESCRIPTOR */}
       <div className={`pictorial-status-banner banner-${status.toLowerCase()}`}>
         <div className="pictorial-icon-wrapper">
-          {isAvailable && <CheckCircle2 size={18} className="pictorial-icon emerald" />}
-          {status === 'WASHING' && <Droplets size={18} className="pictorial-icon blue pulse" />}
-          {status === 'SPINNING' && <Activity size={18} className="pictorial-icon purple spin" />}
-          {isCompleted && <PackageCheck size={18} className="pictorial-icon amber" />}
-          {isOffline && <AlertOctagon size={18} className="pictorial-icon rose" />}
+          {isAvailable && <CheckCircle2 size={20} className="pictorial-icon emerald" />}
+          {status === 'WASHING' && <Droplets size={20} className="pictorial-icon blue pulse" />}
+          {status === 'SPINNING' && <Activity size={20} className="pictorial-icon purple spin" />}
+          {isCompleted && <PackageCheck size={20} className="pictorial-icon amber" />}
+          {isOffline && <AlertOctagon size={20} className="pictorial-icon rose" />}
         </div>
         <div className="pictorial-text-group">
           <strong className="pictorial-main-title">
             {isAvailable && 'Available • Clean Drum Ready'}
             {status === 'WASHING' && `${cycleType || 'Wash Cycle'} • Detergent Wash`}
             {status === 'SPINNING' && 'Rinse & Spin • High-Speed Extraction'}
-            {isCompleted && 'Cycle Finished • Clean & Ready'}
+            {isCompleted && 'Cycle Finished • Collect Laundry'}
             {isOffline && 'Under Maintenance'}
           </strong>
           <span className="pictorial-sub-text">
             {isAvailable && `${machine.cycleDurationMinutes || 30} mins standard wash cycle`}
-            {isOperating && `${Math.round(Number(progress) || 0)}% completed • ${formatTime(remainingSeconds)} remaining`}
+            {isOperating && `${Math.round(Number(progress) || 0)}% complete • ${formatTime(remainingSeconds)} remaining`}
             {isCompleted && 'Please collect clothes within 15 mins'}
             {isOffline && (offlineReason || 'Routine servicing in progress')}
           </span>

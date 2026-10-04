@@ -41,6 +41,13 @@ import {
   AlertTriangle
 } from 'lucide-react';
 
+function formatTime(seconds) {
+  if (!seconds || seconds <= 0) return '00:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
 export default function Dashboard({ 
   user, 
   onLogout, 
@@ -110,6 +117,19 @@ export default function Dashboard({
   const pendingApprovalsCount = useMemo(() => {
     return pendingUsers.filter((u) => u.status === 'pending').length;
   }, [pendingUsers]);
+
+  // Find if current student has an active cycle in progress or completed laundry
+  const myActiveMachine = useMemo(() => {
+    return machines.find(
+      (m) => m.currentUserId === user?.uid && (m.status === 'WASHING' || m.status === 'SPINNING')
+    );
+  }, [machines, user?.uid]);
+
+  const myCompletedMachine = useMemo(() => {
+    return machines.find(
+      (m) => m.currentUserId === user?.uid && m.status === 'COMPLETED'
+    );
+  }, [machines, user?.uid]);
 
   // =========================================================
   // REAL-TIME SIMULATED IOT TELEMETRY TICKER (1-second interval)
@@ -588,6 +608,61 @@ export default function Dashboard({
           {/* SECTION 1: DASHBOARD & FLEET OVERVIEW */}
           {(activeSection === 'dashboard' || activeSection === 'machines') && (
             <>
+              {/* STUDENT ACTIVE LAUNDRY HERO CARD (Prominent Big Display) */}
+              {!isAdmin && myActiveMachine && (
+                <div className={`active-laundry-hero-card ${myActiveMachine.status.toLowerCase()}`}>
+                  <div className="hero-card-left">
+                    <div className="hero-eyebrow">
+                      <span className="live-indicator-dot" />
+                      <span>YOUR ACTIVE LAUNDRY SESSION</span>
+                    </div>
+                    <h2 className="hero-big-status">
+                      {myActiveMachine.status === 'WASHING' ? 'WASHING IN PROGRESS' : 'SPINNING & EXTRACTION'}
+                    </h2>
+                    <p className="hero-machine-name">
+                      Washing Machine No. {myActiveMachine.machineNumber} • {myActiveMachine.name} ({myActiveMachine.floor})
+                    </p>
+                    <div className="hero-progress-group">
+                      <div className="hero-progress-labels">
+                        <span>Cycle Progress ({myActiveMachine.cycleType || 'Standard Wash'})</span>
+                        <strong>{Math.round(myActiveMachine.progress || 0)}%</strong>
+                      </div>
+                      <div className="hero-progress-track">
+                        <div className="hero-progress-fill" style={{ width: `${Math.max(myActiveMachine.progress || 0, 5)}%` }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="hero-card-right">
+                    <div className="hero-countdown-box">
+                      <span className="countdown-sub">ESTIMATED REMAINING</span>
+                      <div className="countdown-digits">{formatTime(myActiveMachine.remainingSeconds)}</div>
+                      <span className="countdown-floor">Floor Bay: {myActiveMachine.floor}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Completed Laundry Alert Banner */}
+              {!isAdmin && myCompletedMachine && (
+                <div className="completed-laundry-hero-card">
+                  <div className="completed-hero-content">
+                    <Sparkles size={24} className="sparkle-gold" />
+                    <div>
+                      <h3>Your Laundry is Clean & Ready for Collection!</h3>
+                      <p>Washing Machine No. {myCompletedMachine.machineNumber} finished. Please collect your items within 15 minutes.</p>
+                    </div>
+                  </div>
+                  <button 
+                    type="button" 
+                    className="btn-collect-hero"
+                    onClick={() => handleCollectLaundry(myCompletedMachine.id)}
+                  >
+                    Collect Laundry
+                  </button>
+                </div>
+              )}
+
               {/* Summary KPI Cards (Total, Available, Washing, Completed) */}
               <SummaryCards machines={machines} bookings={bookings} />
 
