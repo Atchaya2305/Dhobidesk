@@ -150,14 +150,31 @@ export default function BookingModal({
                       setErrorMessage('');
                     }}
                   >
-                    <div className="tile-top">
-                      <span className="tile-num">No. {m.machineNumber}</span>
-                      <span className={`tile-status ${m.status.toLowerCase()}`}>
-                        {m.status}
-                      </span>
+                    <div className="tile-thumb-box">
+                      <img 
+                        src={
+                          m.status === 'WASHING'
+                            ? '/assets/machines/washer-washing.jpg'
+                            : m.status === 'SPINNING'
+                            ? '/assets/machines/washer-spinning.jpg'
+                            : m.status === 'COMPLETED'
+                            ? '/assets/machines/washer-completed.jpg'
+                            : '/assets/machines/washer-idle.jpg'
+                        }
+                        alt={`Washer ${m.machineNumber}`}
+                        className="tile-thumb-img"
+                      />
                     </div>
-                    <span className="tile-name">{m.name}</span>
-                    <span className="tile-floor">{m.floor} • {m.capacityKg}kg</span>
+                    <div className="tile-info">
+                      <div className="tile-top">
+                        <span className="tile-num">No. {m.machineNumber}</span>
+                        <span className={`tile-status ${m.status.toLowerCase()}`}>
+                          {m.status}
+                        </span>
+                      </div>
+                      <span className="tile-name">{m.name}</span>
+                      <span className="tile-floor">{m.floor} • {m.capacityKg}kg</span>
+                    </div>
                   </button>
                 );
               })}

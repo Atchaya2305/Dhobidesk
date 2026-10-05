@@ -195,14 +195,24 @@ export default function FaultsView({
                   </span>
                 </div>
 
-                <div className="fault-ticket-main">
-                  <h4 className="fault-ticket-title">{fault.title}</h4>
-                  <div className="fault-meta-row">
-                    <strong>{fault.machineName} ({fault.floor})</strong>
-                    <span className="dot-divider">•</span>
-                    <span>Machine #{fault.machineNumber}</span>
+                <div className="fault-ticket-main-flex">
+                  <div className="fault-machine-preview-box">
+                    <img 
+                      src="/assets/machines/washer-idle.jpg" 
+                      alt={fault.machineName} 
+                      className="fault-washer-img" 
+                    />
+                    <span className="fault-unit-badge">Unit #{fault.machineNumber}</span>
                   </div>
-                  <p className="fault-ticket-desc">{fault.description}</p>
+                  <div className="fault-ticket-main">
+                    <h4 className="fault-ticket-title">{fault.title}</h4>
+                    <div className="fault-meta-row">
+                      <strong>{fault.machineName} ({fault.floor})</strong>
+                      <span className="dot-divider">•</span>
+                      <span>Floor {fault.floor}</span>
+                    </div>
+                    <p className="fault-ticket-desc">{fault.description}</p>
+                  </div>
                 </div>
 
                 {/* Sensor reading callout */}

@@ -139,8 +139,25 @@ export default function AdminModal({
                   {machines.map((m) => (
                     <tr key={m.id}>
                       <td>
-                        <strong>{m.name}</strong>
-                        <div className="sub-text">No. {m.machineNumber} • {m.type}</div>
+                        <div className="admin-machine-cell">
+                          <img 
+                            src={
+                              m.status === 'WASHING'
+                                ? '/assets/machines/washer-washing.jpg'
+                                : m.status === 'SPINNING'
+                                ? '/assets/machines/washer-spinning.jpg'
+                                : m.status === 'COMPLETED'
+                                ? '/assets/machines/washer-completed.jpg'
+                                : '/assets/machines/washer-idle.jpg'
+                            }
+                            alt={m.name}
+                            className="admin-washer-thumb"
+                          />
+                          <div>
+                            <strong>{m.name}</strong>
+                            <div className="sub-text">No. {m.machineNumber} • {m.type}</div>
+                          </div>
+                        </div>
                       </td>
                       <td>{m.floor}</td>
                       <td>

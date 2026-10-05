@@ -120,8 +120,21 @@ export default function NotificationsView({
               onClick={() => onMarkOneRead && onMarkOneRead(item.id)}
             >
               <div className="notif-item-left">
-                <div className={`notif-icon-avatar icon-${item.type}`}>
-                  {getIcon(item.type)}
+                <div className="notif-thumb-box">
+                  <img 
+                    src={
+                      item.type === 'success' 
+                        ? '/assets/machines/washer-completed.jpg' 
+                        : item.type === 'warning' || item.type === 'alert'
+                        ? '/assets/machines/washer-idle.jpg'
+                        : '/assets/machines/washer-washing.jpg'
+                    }
+                    alt="Alert Washer"
+                    className="notif-thumb-img"
+                  />
+                  <div className={`notif-icon-badge-overlay icon-${item.type}`}>
+                    {getIcon(item.type)}
+                  </div>
                 </div>
                 <div className="notif-text-block">
                   <div className="notif-title-row">

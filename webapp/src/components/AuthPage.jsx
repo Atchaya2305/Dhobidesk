@@ -194,19 +194,105 @@ export default function AuthPage({
       <div className="auth-ambient-circle-1" />
       <div className="auth-ambient-circle-2" />
 
-      <div className="auth-card-wrapper">
-        {/* Brand Header */}
-        <div className="auth-brand-header">
-          <div className="auth-logo-badge">
-            <Waves className="auth-logo-icon" size={26} />
+      <div className="auth-split-layout">
+        {/* Left Side: Pictorial Hero Showcase of the Hostel Laundry Facility */}
+        <div className="auth-hero-showcase">
+          <div className="auth-hero-image-wrap">
+            <img 
+              src="/assets/laundry-lounge.jpg" 
+              alt="DhobiDesk Luxury Hostel Laundry Lounge" 
+              className="auth-hero-bg-img"
+            />
+            <div className="auth-hero-overlay" />
           </div>
-          <h1 className="auth-title">DhobiDesk</h1>
-          <p className="auth-subtitle">Smart Hostel Laundry Management System</p>
-          <div className="auth-tagline-pill">
-            <Sparkles size={13} className="sparkle-icon" />
-            <span>Campus Washer Fleet Operations</span>
+
+          <div className="auth-hero-content">
+            <div className="auth-hero-brand">
+              <div className="auth-hero-logo-badge">
+                <Waves size={24} />
+              </div>
+              <span className="auth-hero-brand-name">DHOBIDESK</span>
+            </div>
+
+            <div className="auth-hero-text-block">
+              <span className="auth-hero-tag">SMART HOSTEL LAUNDRY OPERATIONS</span>
+              <h2 className="auth-hero-title">Your Campus Laundry, <em>Elevated.</em></h2>
+              <p className="auth-hero-desc">
+                Experience seamless zero-queue washing with live IoT sensor telemetry, automated slot reservations, and Warden-verified student safety.
+              </p>
+            </div>
+
+            <div className="auth-hero-features-grid">
+              <div className="auth-feat-item">
+                <div className="auth-feat-icon">
+                  <Sparkles size={16} />
+                </div>
+                <div>
+                  <strong>Double-Booking Shield</strong>
+                  <span>Exclusive reserved time windows with zero waiting</span>
+                </div>
+              </div>
+
+              <div className="auth-feat-item">
+                <div className="auth-feat-icon">
+                  <Clock size={16} />
+                </div>
+                <div>
+                  <strong>Live Cycle Telemetry</strong>
+                  <span>Watch real-time water, RPM & remaining time</span>
+                </div>
+              </div>
+
+              <div className="auth-feat-item">
+                <div className="auth-feat-icon">
+                  <ShieldCheck size={16} />
+                </div>
+                <div>
+                  <strong>Warden Verification</strong>
+                  <span>Hostel room identity verification before access</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Demo Access Bar */}
+            <div className="auth-demo-quick-bar">
+              <span className="auth-demo-label">ONE-CLICK DEMO ACCESS:</span>
+              <div className="auth-demo-buttons">
+                <button
+                  type="button"
+                  className="btn-demo-pill"
+                  onClick={() => handleDemoLogin('student')}
+                >
+                  <GraduationCap size={14} />
+                  <span>Student (Ananya - Room 204)</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn-demo-pill"
+                  onClick={() => handleDemoLogin('admin')}
+                >
+                  <Shield size={14} />
+                  <span>Warden / Admin (PIN 1234)</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
+
+        {/* Right Side: Authentication Form Card */}
+        <div className="auth-card-wrapper">
+          {/* Brand Header */}
+          <div className="auth-brand-header">
+            <div className="auth-logo-badge">
+              <Waves className="auth-logo-icon" size={26} />
+            </div>
+            <h1 className="auth-title">Welcome to DhobiDesk</h1>
+            <p className="auth-subtitle">Smart Hostel Laundry Management System</p>
+            <div className="auth-tagline-pill">
+              <Sparkles size={13} className="sparkle-icon" />
+              <span>Campus Washer Fleet Operations</span>
+            </div>
+          </div>
 
         {/* REGISTRATION SUBMITTED SUCCESS BANNER */}
         {submittedSuccess && (
@@ -522,5 +608,6 @@ export default function AuthPage({
         </div>
       </div>
     </div>
-  );
+  </div>
+);
 }

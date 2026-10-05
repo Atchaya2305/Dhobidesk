@@ -14,10 +14,8 @@ import {
 import './App.css';
 
 function App() {
-  // Starts with login page by default if no user is active in session
-  const [user, setUser] = useState(() => {
-    return loadStoredUser();
-  });
+  // Always start at the login page when opening the website
+  const [user, setUser] = useState(null);
 
   const [registeredUsers, setRegisteredUsers] = useState(() => {
     return loadStoredRegisteredUsers();

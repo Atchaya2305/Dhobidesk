@@ -270,6 +270,26 @@ export default function ProfileView({ user, onUpdateUser, bookings }) {
               <li>Do not wash heavy blankets in 6 kg express machines (use Machine 05).</li>
             </ul>
           </div>
+
+          {/* Pictorial Facility Showcase */}
+          <div className="profile-facility-showcase-card">
+            <div className="profile-facility-img-wrap">
+              <img 
+                src="/assets/laundry-lounge.jpg" 
+                alt="Campus Laundry Lounge" 
+                className="profile-facility-img" 
+              />
+              <div className="profile-facility-overlay" />
+              <div className="profile-facility-badge">
+                <Sparkles size={12} />
+                <span>{user?.hostelBlock || 'Hostel Central Bay'}</span>
+              </div>
+            </div>
+            <div className="profile-facility-info">
+              <h4>Modern Smart Laundry Lounge</h4>
+              <p>Equipped with 6 high-speed IoT washers, automated double-booking protection, and 24/7 telemetry monitoring.</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>

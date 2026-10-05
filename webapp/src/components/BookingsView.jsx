@@ -234,8 +234,12 @@ export default function BookingsView({
                 <div key={booking.id} className="booking-item-card admin-token-card">
                   <div className="booking-card-top">
                     <div className="booking-machine-info">
-                      <div className="booking-m-icon">
-                        <Layers size={18} />
+                      <div className="booking-m-thumb-wrap">
+                        <img 
+                          src={booking.status === 'active' ? '/assets/machines/washer-washing.jpg' : '/assets/machines/washer-idle.jpg'} 
+                          alt={booking.machineName} 
+                          className="booking-m-thumb-img" 
+                        />
                       </div>
                       <div>
                         <strong className="booking-m-title">{booking.machineName}</strong>
@@ -332,8 +336,12 @@ export default function BookingsView({
                 <div key={booking.id} className="booking-item-card">
                   <div className="booking-card-top">
                     <div className="booking-machine-info">
-                      <div className="booking-m-icon">
-                        <Layers size={18} />
+                      <div className="booking-m-thumb-wrap">
+                        <img 
+                          src={booking.status === 'active' ? '/assets/machines/washer-washing.jpg' : '/assets/machines/washer-idle.jpg'} 
+                          alt={booking.machineName} 
+                          className="booking-m-thumb-img" 
+                        />
                       </div>
                       <div>
                         <strong className="booking-m-title">{booking.machineName}</strong>
@@ -474,8 +482,12 @@ export default function BookingsView({
                 <div key={booking.id} className="booking-item-card history-card">
                   <div className="booking-card-top">
                     <div className="booking-machine-info">
-                      <div className="booking-m-icon">
-                        <Layers size={18} />
+                      <div className="booking-m-thumb-wrap">
+                        <img 
+                          src={booking.status === 'completed' ? '/assets/machines/washer-completed.jpg' : '/assets/machines/washer-idle.jpg'} 
+                          alt={booking.machineName} 
+                          className="booking-m-thumb-img" 
+                        />
                       </div>
                       <div>
                         <strong className="booking-m-title">{booking.machineName}</strong>

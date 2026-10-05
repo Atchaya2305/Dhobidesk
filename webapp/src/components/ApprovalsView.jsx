@@ -78,6 +78,27 @@ export default function ApprovalsView({
         </div>
       </div>
 
+      {/* Pictorial Facility Security Showcase Strip */}
+      <div className="admin-facility-hero-strip">
+        <div className="admin-facility-thumb-box">
+          <img 
+            src="/assets/laundry-lounge.jpg" 
+            alt="Hostel Laundry Hub" 
+            className="admin-facility-thumb-img" 
+          />
+        </div>
+        <div className="admin-facility-text">
+          <div className="admin-facility-badge">
+            <ShieldCheck size={13} />
+            <span>HOSTEL RESIDENCE ACCESS CONTROL</span>
+          </div>
+          <h4>Campus Laundry Facility Security & Roster Verification</h4>
+          <p>
+            All resident accounts are strictly gated behind hostel room verification. Approving a student automatically allocates their daily 2-slot laundry quota and activates smart scheduling privileges.
+          </p>
+        </div>
+      </div>
+
       {/* KPI Cards */}
       <div className="summary-cards-grid">
         <div className="summary-kpi-card">
